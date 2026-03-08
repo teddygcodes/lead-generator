@@ -1,186 +1,213 @@
 # Electrical Leads Engine
 
-Internal sales intelligence tool for Atlanta metro and North Georgia electrical contractor leads. Login-protected. Built for distribution reps.
+> Internal sales intelligence tool for Atlanta metro and North Georgia electrical contractor leads.
+
+Built for electrical distribution reps who need to know which contractors are active, what they're working on, and who to call next. Login-protected. Data stays yours.
 
 ---
 
-## Setup
+## What it does
+
+- **Company database** — stores electrical contractor records with scoring, segments, and contact info
+- **Lead scoring** — transparent scores with mapped reasons (geography, segment fit, signals, contacts)
+- **CSV import** — staged import flow: parse → preview → map → validate → commit
+- **Website enrichment** — fetches contractor websites, extracts emails/phones/service keywords
+- **AI enrichment** — Anthropic or OpenAI wrapper with structured output validation and keyword fallback
+- **Signal tracking** — permit activity, license data, website signals all feed into scores
+- **Jobs log** — full visibility into crawl history, errors, and source run status
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 App Router + TypeScript |
+| Styling | Tailwind CSS v3 |
+| Auth | Clerk v6 |
+| ORM | Prisma v5 |
+| Database | PostgreSQL (Supabase) |
+| Validation | zod |
+| Testing | vitest |
+| Package manager | pnpm |
+
+---
+
+## Getting started
 
 ### Prerequisites
-- Node.js 18+
-- pnpm (`npm install -g pnpm`)
-- PostgreSQL database (Supabase recommended)
-- Clerk account
 
-### Install
+- Node.js 18+
+- pnpm — `npm install -g pnpm`
+- [Supabase](https://supabase.com) project (free tier works)
+- [Clerk](https://clerk.com) application (free tier works)
+
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/teddygcodes/lead-generator.git
+cd lead-generator
 pnpm install
 ```
 
-### Environment
-
-Copy `.env.example` to `.env.local` and fill in all values:
+### 2. Set up environment
 
 ```bash
 cp .env.example .env.local
 ```
 
-Required environment variables:
+Fill in `.env.local`:
 
-| Variable | Description |
+| Variable | Where to get it |
 |---|---|
-| `DATABASE_URL` | Postgres connection string (pooled via pgbouncer for Supabase) |
-| `DIRECT_URL` | Direct Postgres connection (used by Prisma migrations) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
-| `CLERK_SECRET_KEY` | Clerk secret key |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-in` |
-| `AI_PROVIDER` | `anthropic` or `openai` |
-| `AI_MODEL` | Model ID (e.g., `claude-3-5-sonnet-20241022`) |
-| `ANTHROPIC_API_KEY` | Anthropic API key (if using Anthropic) |
-| `OPENAI_API_KEY` | OpenAI API key (if using OpenAI) |
-| `ENRICHMENT_TIMEOUT_MS` | Website fetch timeout in ms (default: 8000) |
+| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string (pooled) |
+| `DIRECT_URL` | Supabase → Project Settings → Database → Connection string (direct) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
+| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) (optional — falls back to keyword classifier) |
 
-### Database
+### 3. Migrate and seed
 
 ```bash
-# Run migrations
-pnpm db:migrate
-
-# Generate Prisma client
-pnpm db:generate
-
-# Seed with demo data (24 companies across 6 counties)
-pnpm db:seed
+pnpm db:migrate   # Apply schema to your database
+pnpm db:seed      # Load 24 demo companies across 6 counties
 ```
 
-### Run locally
+### 4. Run
 
 ```bash
 pnpm dev
 ```
 
-App runs at `http://localhost:3000`. Sign in via Clerk. All routes except `/sign-in` and `/api/health` require auth.
-
----
-
-## Architecture
-
-```
-app/                        Next.js App Router
-  (protected)/              Auth-gated routes
-    dashboard/              Summary: companies, signals, recent jobs
-    companies/              Filterable, sortable company table
-    companies/[id]/         Company detail with score + signals
-    jobs/                   CrawlJob operational log
-    import/                 CSV import flow
-  api/                      API routes
-    companies/              GET list, GET/PATCH by ID
-    jobs/                   GET crawl job list
-    import/csv/preview/     POST — parse CSV, no DB write
-    import/csv/commit/      POST — validate + persist CSV
-    enrich/company/[id]/    POST — enrich one company
-    enrich/batch/           POST — enrich batch (≤10)
-    health/                 GET — public health check
-
-lib/
-  normalization/            Name, domain, phone, address normalization
-  dedupe/                   Company deduplication: domain → name → phone
-  scoring/                  Lead + active score with transparent reasons
-    config.ts               All weights and thresholds (single source of truth)
-  enrichment/
-    index.ts                Website fetch + extraction service
-    keywords.ts             Non-AI keyword classifier (segment + specialties)
-  ai/                       Provider-agnostic AI wrapper (raw fetch, no SDK)
-  sources/
-    base.ts                 SourceAdapter TypeScript interface
-    company-site.ts         Company website adapter
-    permits.ts              Permit adapter (DEMO MODE — see below)
-    licenses.ts             License adapter (DEMO MODE — see below)
-  jobs/runner.ts            Job runner: invokes adapters, records CrawlJob
-  validation/schemas.ts     Centralized zod schemas (never inline per route)
-  pagination.ts             Consistent pagination response builder
-  format.ts                 Date/duration/phone formatting utilities
-  db.ts                     Prisma client singleton
-
-components/
-  layout/                   Sidebar, NavLink
-  ui/                       Badge, EmptyState
-  companies/                FilterBar, CompaniesTable, EnrichButton
-  import/                   ImportFlow (staged CSV import)
-
-prisma/
-  schema.prisma             Full schema: Company, Signal, Contact, CrawlJob, Tag
-  seed.ts                   24+ demo companies with signals and contacts
-```
+Open [http://localhost:3000](http://localhost:3000). Sign in via Clerk. You'll land on the dashboard.
 
 ---
 
 ## Commands
 
 ```bash
-pnpm dev          # Start development server
+pnpm dev          # Development server
 pnpm build        # Production build
 pnpm lint         # ESLint
-pnpm test         # Run unit tests (vitest)
+pnpm test         # Unit tests (91 passing)
 pnpm db:migrate   # Run Prisma migrations
 pnpm db:generate  # Regenerate Prisma client
 pnpm db:seed      # Seed demo data
-pnpm db:studio    # Prisma Studio (GUI)
+pnpm db:studio    # Prisma Studio (database GUI)
 ```
 
 ---
 
-## Deferred work (honest status)
+## Project structure
 
-### Permit adapter (`lib/sources/permits.ts`)
-**Status: Demo stub — returns fixture data only.**
-To connect a live source, you need one of:
-- Georgia SOS permit portal API (no public REST API exists as of build date; scraping or bulk data required)
-- County-level permit APIs (Gwinnett, Hall, Cobb, Forsyth, Fulton, Cherokee all have separate portals with varying data access)
-- Third-party aggregator (BuildingConnected, ConstructConnect, Dodge Data)
+```
+app/
+  (protected)/          Auth-gated pages
+    dashboard/          Summary stats, recent signals, job log
+    companies/          Filterable, sortable contractor table
+    companies/[id]/     Detail: identity, score, reasons, signals, contacts
+    jobs/               CrawlJob operational log
+    import/             Staged CSV import flow
+  api/
+    companies/          GET list + filters, GET/PATCH by ID
+    jobs/               GET paginated job history
+    import/csv/         POST preview (no DB write), POST commit
+    enrich/             POST single company, POST batch (≤10)
+    health/             GET public health check
 
-### License adapter (`lib/sources/licenses.ts`)
-**Status: Demo stub — returns fixture data only.**
-To connect a live source, you need one of:
-- Georgia SOS Licensing Division data (EC license lookup at https://sos.ga.gov/index.php/licensing)
-- Bulk license data purchase from state
-- Third-party license aggregator
+lib/
+  normalization/        Name, domain, phone, address normalization
+  dedupe/               Dedup strategy: domain → normalized name → phone
+  scoring/              Lead score + active score with transparent reasons[]
+    config.ts           All weights in one place (single source of truth)
+  enrichment/
+    index.ts            Website fetch + HTML extraction (same-domain, 4 pages max)
+    keywords.ts         Keyword classifier — works without AI
+  ai/                   Provider-agnostic wrapper (raw fetch, zod-validated output)
+  sources/
+    base.ts             SourceAdapter interface
+    company-site.ts     Website enrichment adapter
+    permits.ts          Permit adapter (demo mode — see below)
+    licenses.ts         License adapter (demo mode — see below)
+  jobs/runner.ts        Job runner: invokes adapters, records CrawlJob
+  validation/schemas.ts Centralized zod schemas (never inline)
 
-### AI enrichment (`lib/ai/index.ts`)
-**Status: Implemented but requires live API key to produce real output.**
-Without a valid `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, the AI enrichment falls back to the keyword classifier. Set the appropriate key in `.env.local` to activate AI enrichment.
+components/
+  layout/               Sidebar, NavLink
+  ui/                   Badge, EmptyState
+  companies/            FilterBar, CompaniesTable, EnrichButton
+  import/               ImportFlow (5-stage CSV import)
 
-### Website enrichment concurrency
-**Status: Bounded at one active run per company.**
-Multi-company concurrent enrichment is sequential in batch mode (max 10 per call). No distributed job queue implemented.
-
-### Tests
-Unit tests cover: normalization, dedupe merge logic, scoring (5 profiles), keyword classifier (4 text types), API schema validation.
-Integration tests with real DB are not implemented. The import flow and enrichment routes are tested manually.
+prisma/
+  schema.prisma         Company, Signal, Contact, CrawlJob, UserNote, Tag
+  seed.ts               24 demo companies across Gwinnett, Hall, Forsyth, Cobb, Fulton, Cherokee
+```
 
 ---
 
-## API contract
+## Adding real contractor data
 
-All business routes require authentication (Clerk session cookie). All errors return `{ error: string, details?: any }`.
+**CSV import** is the fastest path. Go to `/import` and upload any `.csv` with at minimum a `name` column. Recognized headers: `name`, `website`, `phone`, `email`, `city`, `county`, `state`, `zip`, `segments`, `specialties`, `street`.
 
-### Companies
-- `GET /api/companies` → `{ data, total, page, limit, totalPages }` — params: search, county, segment, status, minScore, hasWebsite, hasEmail, sort, order, page, limit
-- `GET /api/companies/:id` → full company + scoreDetails
-- `PATCH /api/companies/:id` → editable fields only: `status`, `doNotContact`, `notes`
+Free data sources for Georgia electrical contractors:
+- [Georgia Secretary of State — Business Search](https://ecorp.sos.ga.gov)
+- [Georgia Secretary of State — License Lookup](https://sos.ga.gov/index.php/licensing)
+- Your existing spreadsheet or CRM export
 
-### Jobs
-- `GET /api/jobs` → paginated CrawlJob records, newest first
+After import, use `/api/enrich/batch` or the Enrich button on individual company pages to pull data from their websites.
 
-### Import
-- `POST /api/import/csv/preview` → parses CSV, returns `{ headers, rows (25), rowCount, suggestedMapping }` — **no DB write**
-- `POST /api/import/csv/commit` → `{ created, updated, skipped, invalid, errors[] }`
+---
 
-### Enrichment
-- `POST /api/enrich/company/:id` → enriches one company, returns updated score
-- `POST /api/enrich/batch` → body: `{ companyIds: string[], limit?: number }` — max 10
+## Scoring
 
-### Health
-- `GET /api/health` → `{ status: "ok", db: "connected" }` — public, no auth required
+Every company gets two scores:
+
+- **Lead score** — long-term potential based on geography, segment fit, and specialties
+- **Active score** — current engagement based on recent signals, website presence, and contact availability
+
+Both scores come with `reasons[]` — a plain-English list of exactly which rules fired. No black boxes.
+
+Score weights live in `lib/scoring/config.ts` — edit them to match your territory priorities.
+
+---
+
+## Deferred work
+
+### Permit adapter
+**Status: Demo stub.** Returns fixture data. To connect live permits you need:
+- County-level permit portal APIs (Gwinnett, Hall, Cobb, Forsyth, Fulton, Cherokee each have separate portals)
+- Or a third-party aggregator: BuildingConnected, ConstructConnect, Dodge Data
+
+### License adapter
+**Status: Demo stub.** Returns fixture data. To connect live license data:
+- Georgia SOS Licensing Division bulk data or scrape of [sos.ga.gov/licensing](https://sos.ga.gov/index.php/licensing)
+
+### Integration tests
+Unit tests cover normalization, dedupe, scoring, keywords, and API schema validation (91 tests). Integration tests with a live DB are not implemented.
+
+### Job queue
+Enrichment runs are sequential. No distributed queue or background workers — suitable for manual/on-demand enrichment at current scale.
+
+---
+
+## API reference
+
+All business routes require a valid Clerk session. Errors return `{ error: string, details?: any }`.
+
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/companies` | List with filters: `search`, `county`, `segment`, `status`, `minScore`, `hasWebsite`, `hasEmail`, `sort`, `page`, `limit` |
+| GET | `/api/companies/:id` | Full company detail + score breakdown |
+| PATCH | `/api/companies/:id` | Update `status`, `doNotContact`, `notes` only |
+| GET | `/api/jobs` | Paginated CrawlJob history, newest first |
+| POST | `/api/import/csv/preview` | Parse CSV → return preview (no DB write) |
+| POST | `/api/import/csv/commit` | Validate + persist → `{ created, updated, skipped, invalid, errors[] }` |
+| POST | `/api/enrich/company/:id` | Enrich one company from its website |
+| POST | `/api/enrich/batch` | Enrich batch: `{ companyIds[], limit? }` — max 10 |
+| GET | `/api/health` | Public health check → `{ status: "ok", db: "connected" }` |
+
+---
+
+## License
+
+Apache 2.0 — see [LICENSE](./LICENSE)
