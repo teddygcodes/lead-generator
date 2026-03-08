@@ -1,0 +1,184 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum CompanyStatus {
+  NEW
+  QUALIFYING
+  ACTIVE
+  INACTIVE
+  DO_NOT_CONTACT
+}
+
+enum SignalType {
+  JOB_POSTING
+  PERMIT
+  LICENSE
+  NEWS
+  WEBSITE_CONTENT
+  MANUAL
+}
+
+enum CrawlJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum SourceType {
+  COMPANY_WEBSITE
+  PERMIT
+  LICENSE
+  CSV_IMPORT
+  MANUAL
+}
+
+model Company {
+  id                   String        @id @default(cuid())
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  name                 String
+  normalizedName       String
+  website              String?
+  domain               String?       @unique
+  phone                String?
+  email                String?
+  street               String?
+  city                 String?
+  state                String?       @default("GA")
+  zip                  String?
+  county               String?
+  region               String?
+  territory            String?
+  description          String?
+  serviceAreas         String[]
+  segments             String[]
+  specialties          String[]
+  employeeSizeEstimate String?
+  sourceConfidence     Float?        @default(0)
+  activeScore          Float?        @default(0)
+  leadScore            Float?        @default(0)
+  status               CompanyStatus @default(NEW)
+  doNotContact         Boolean       @default(false)
+  notes                String?
+  lastSeenAt           DateTime?
+  lastEnrichedAt       DateTime?
+
+  signals   Signal[]
+  contacts  Contact[]
+  userNotes UserNote[]
+  tags      CompanyTag[]
+
+  @@index([normalizedName])
+  @@index([county])
+  @@index([leadScore])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Signal {
+  id             String     @id @default(cuid())
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  companyId      String
+  sourceType     SourceType
+  sourceName     String?
+  sourceUrl      String?
+  title          String?
+  snippet        String?
+  rawText        String?
+  signalType     SignalType
+  signalDate     DateTime?
+  county         String?
+  city           String?
+  metadata       Json?
+  relevanceScore Float?     @default(0)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([signalType])
+  @@index([signalDate])
+  @@index([createdAt])
+}
+
+model Contact {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  companyId       String
+  name            String?
+  title           String?
+  email           String?
+  phone           String?
+  linkedinUrl     String?
+  source          String?
+  confidenceScore Float?   @default(0)
+  manualOnly      Boolean  @default(false)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model CrawlJob {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  sourceType     SourceType
+  status         CrawlJobStatus @default(PENDING)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  recordsFound   Int?           @default(0)
+  recordsCreated Int?           @default(0)
+  recordsUpdated Int?           @default(0)
+  errorMessage   String?
+  metadata       Json?
+
+  @@index([status])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
+model UserNote {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  companyId    String
+  authorUserId String
+  body         String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Tag {
+  id        String       @id @default(cuid())
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  name      String       @unique
+  color     String?
+
+  companies CompanyTag[]
+}
+
+model CompanyTag {
+  companyId String
+  tagId     String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, tagId])
+}
