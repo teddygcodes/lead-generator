@@ -32,5 +32,13 @@ export async function GET(req: NextRequest) {
     db.crawlJob.count({ where }),
   ])
 
-  return NextResponse.json(buildPaginatedResponse(jobs, total, page, limit))
+  // Map internal adapter key to product-facing label before returning.
+  // "LICENSE" is a backward-compat SourceType enum value used internally by the
+  // Business Registry adapter; it must never appear in API responses or UI text.
+  const mappedJobs = jobs.map((j) => ({
+    ...j,
+    sourceType: j.sourceType === 'LICENSE' ? 'BUSINESS_REGISTRY' : j.sourceType,
+  }))
+
+  return NextResponse.json(buildPaginatedResponse(mappedJobs, total, page, limit))
 }

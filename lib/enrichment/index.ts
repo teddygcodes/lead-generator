@@ -32,10 +32,86 @@ export interface EnrichmentResult {
 
 const SUBPAGE_PATHS = ['/about', '/services', '/contact', '/about-us', '/our-services', '/what-we-do']
 
+// Per-domain robots.txt disallow cache.
+// null = robots.txt unreachable; v1 policy: treat as no restrictions and proceed with crawl.
+// To tighten in a future version: on unreachable robots.txt, skip crawl rather than allow.
+// Cache is process-local — avoids repeated fetches in a run, not persistent across restarts.
+const robotsCache = new Map<string, string[] | null>()
+
 /**
- * Fetch a URL with timeout. Returns null on failure.
+ * Fetch and parse Disallow paths for User-agent: * from robots.txt.
+ * v1 lightweight robots respect: reads User-agent: * and Disallow: lines only.
+ * Does not handle Allow:, wildcard patterns, crawl-delay, multiple wildcard blocks,
+ * or inline comments — first-pass basic structure only.
+ * Returns null if robots.txt is unreachable (v1 policy: allow crawl; see cache comment).
+ * Not exported — mock at the fetch/fetchPage level in tests rather than this function.
+ */
+async function fetchRobots(domain: string, siteOrigin: string): Promise<string[] | null> {
+  if (robotsCache.has(domain)) return robotsCache.get(domain)!
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const res = await fetch(`${siteOrigin}/robots.txt`, { signal: controller.signal })
+    clearTimeout(timer)
+    if (!res.ok) { robotsCache.set(domain, null); return null }
+    const disallowed = parseRobotsDisallowedPaths(await res.text())
+    robotsCache.set(domain, disallowed)
+    return disallowed
+  } catch {
+    robotsCache.set(domain, null)
+    return null
+  }
+}
+
+/**
+ * Parse Disallow paths for User-agent: * block only. Exported for unit testing.
+ * v1: inline comments not stripped; multiple wildcard sections not merged robustly;
+ * only basic `User-agent: *` + `Disallow:` structure is supported.
+ * `Disallow: /` blocks all paths (correct by prefix logic).
+ */
+export function parseRobotsDisallowedPaths(text: string): string[] {
+  const disallowed: string[] = []
+  let inWildcardBlock = false
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.toLowerCase().startsWith('user-agent:')) {
+      inWildcardBlock = trimmed.slice('user-agent:'.length).trim() === '*'
+    } else if (inWildcardBlock && trimmed.toLowerCase().startsWith('disallow:')) {
+      const path = trimmed.slice('disallow:'.length).trim()
+      if (path) disallowed.push(path)
+    }
+  }
+  return disallowed
+}
+
+/**
+ * Returns true if robots.txt disallows the given path (prefix match, v1).
+ * null disallowed list = unreachable robots.txt = allow (v1 policy). Exported for unit testing.
+ */
+export function isRobotsBlocked(path: string, disallowed: string[] | null): boolean {
+  if (!disallowed) return false
+  return disallowed.some((d) => d.length > 0 && path.startsWith(d))
+}
+
+// SSRF protection: block private/local hostnames before any outbound fetch.
+// Normalized to lowercase; also blocks IPv6 localhost (::1).
+const PRIVATE_HOST_RE =
+  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/
+
+/**
+ * Fetch a URL with timeout. Returns null on failure or if the URL resolves to a
+ * private/local host (SSRF protection).
  */
 async function fetchPage(url: string): Promise<string | null> {
+  // SSRF guard — reject private and local addresses before fetching
+  let hostname: string
+  try {
+    hostname = new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+  if (hostname === '::1' || PRIVATE_HOST_RE.test(hostname)) return null
+
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
@@ -108,14 +184,20 @@ function extractFromHtml(html: string): Partial<EnrichmentPayload> {
 
 /**
  * Crawl a company website and extract enrichment data.
- * Respects same-domain constraint and max pages.
- * NOTE: This tool does not enforce robots.txt in v1. See TODO in README.
+ * Respects same-domain constraint, max pages, and robots.txt (User-agent: * + Disallow: only).
  */
 export async function enrichFromWebsite(websiteUrl: string): Promise<EnrichmentResult> {
   const normalizedUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`
   const domain = normalizeDomain(normalizedUrl)
   if (!domain) {
     return { success: false, error: 'Invalid URL — could not parse domain' }
+  }
+
+  const siteOrigin = (() => { try { const u = new URL(normalizedUrl); return `${u.protocol}//${u.host}` } catch { return `https://${domain}` } })()
+  const disallowedPaths = await fetchRobots(domain, siteOrigin)
+  const homepagePath = (() => { try { return new URL(normalizedUrl).pathname || '/' } catch { return '/' } })()
+  if (isRobotsBlocked(homepagePath, disallowedPaths)) {
+    return { success: false, error: `robots.txt disallows crawling ${domain}` }
   }
 
   const pagesScraped: string[] = []
@@ -149,8 +231,9 @@ export async function enrichFromWebsite(websiteUrl: string): Promise<EnrichmentR
   for (const path of SUBPAGE_PATHS) {
     if (additionalPages >= MAX_PAGES - 1) break
     const subUrl = `https://${domain}${path}`
-    // Don't refetch if already scraped
+    // Don't refetch if already scraped; skip if robots.txt disallows this path
     if (pagesScraped.includes(subUrl)) continue
+    if (isRobotsBlocked(path, disallowedPaths)) continue
     const html = await fetchPage(subUrl)
     if (!html) continue
     pagesScraped.push(subUrl)
@@ -207,7 +290,7 @@ export async function enrichCompany(
       sourceType: 'COMPANY_WEBSITE',
       status: 'RUNNING',
       startedAt: new Date(),
-      metadata: { companyId, url: websiteUrl },
+      metadata: { companyId, url: websiteUrl, liveMode: true },
     },
   })
 
@@ -229,38 +312,41 @@ export async function enrichCompany(
     const { payload } = result
     const classification = classifyText(payload.extractedText)
 
-    // Update company with enrichment data
-    await db.company.update({
-      where: { id: companyId },
-      data: {
-        lastEnrichedAt: new Date(),
-        lastSeenAt: new Date(),
-        description: payload.description || undefined,
-        email: payload.emails[0] || undefined,
-        phone: payload.phones[0] || undefined,
-        segments:
-          classification.segments.length > 0 ? classification.segments : undefined,
-        specialties:
-          classification.matchedSpecialties.length > 0
-            ? classification.matchedSpecialties
-            : undefined,
-      },
-    })
+    // Update company + create signal atomically.
+    // If signal creation fails, the company update is rolled back — no orphaned enrichment state.
+    // CrawlJob lifecycle updates stay outside this transaction.
+    await db.$transaction(async (tx) => {
+      await tx.company.update({
+        where: { id: companyId },
+        data: {
+          lastEnrichedAt: new Date(),
+          lastSeenAt: new Date(),
+          description: payload.description || undefined,
+          email: payload.emails[0] || undefined,
+          phone: payload.phones[0] || undefined,
+          segments:
+            classification.segments.length > 0 ? classification.segments : undefined,
+          specialties:
+            classification.matchedSpecialties.length > 0
+              ? classification.matchedSpecialties
+              : undefined,
+        },
+      })
 
-    // Store a signal for this enrichment
-    await db.signal.create({
-      data: {
-        companyId,
-        sourceType: 'COMPANY_WEBSITE',
-        sourceName: 'Website Enrichment',
-        sourceUrl: websiteUrl,
-        title: payload.title || 'Website content extracted',
-        snippet: payload.description?.slice(0, 500) || payload.extractedText.slice(0, 500),
-        rawText: payload.extractedText.slice(0, 2000),
-        signalType: 'WEBSITE_CONTENT',
-        signalDate: new Date(),
-        relevanceScore: classification.confidence,
-      },
+      await tx.signal.create({
+        data: {
+          companyId,
+          sourceType: 'COMPANY_WEBSITE',
+          sourceName: 'Website Enrichment',
+          sourceUrl: websiteUrl,
+          title: payload.title || 'Website content extracted',
+          snippet: payload.description?.slice(0, 500) || payload.extractedText.slice(0, 500),
+          rawText: payload.extractedText.slice(0, 2000),
+          signalType: 'WEBSITE_CONTENT',
+          signalDate: new Date(),
+          relevanceScore: classification.confidence,
+        },
+      })
     })
 
     await db.crawlJob.update({
@@ -270,11 +356,7 @@ export async function enrichCompany(
         finishedAt: new Date(),
         recordsFound: payload.pagesScraped.length,
         recordsUpdated: 1,
-        metadata: {
-          companyId,
-          url: websiteUrl,
-          pagesScraped: payload.pagesScraped,
-        },
+        // metadata intentionally absent — set once at creation, never overwritten
       },
     })
 

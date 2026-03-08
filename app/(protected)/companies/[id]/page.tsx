@@ -17,8 +17,8 @@ export default async function CompanyDetailPage({ params }: Params) {
   const company = await db.company.findUnique({
     where: { id },
     include: {
-      signals: { orderBy: { signalDate: 'desc' }, take: 20 },
-      contacts: { orderBy: { confidenceScore: 'desc' } },
+      signals: { orderBy: { signalDate: 'desc' }, take: 50 },
+      contacts: { orderBy: { confidenceScore: 'desc' }, take: 50 },
       userNotes: { orderBy: { createdAt: 'desc' }, take: 5 },
       tags: { include: { tag: true } },
     },

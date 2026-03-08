@@ -7,7 +7,7 @@ import { db } from '@/lib/db'
 import type { SourceAdapter } from '@/lib/sources/base'
 import { companySiteAdapter } from '@/lib/sources/company-site'
 import { permitAdapter } from '@/lib/sources/permits'
-import { licenseAdapter } from '@/lib/sources/licenses'
+import { licenseAdapter } from '@/lib/sources/business-registry'
 
 const ADAPTERS: Record<string, SourceAdapter> = {
   COMPANY_WEBSITE: companySiteAdapter,
@@ -22,6 +22,13 @@ export interface RunJobResult {
   recordsCreated: number
   recordsUpdated: number
   errorMessage?: string
+  liveMode: boolean
+}
+
+// Defensive fallback only — adapter.demoReason is authoritative; do not expand this table
+const DEMO_REASONS: Record<string, string> = {
+  LICENSE: 'OPENCORPORATES_API_KEY not set',
+  PERMIT: 'Live ArcGIS schema not confirmed — see permits.ts step 0 comment',
 }
 
 /**
@@ -37,13 +44,22 @@ export async function runJob(
     throw new Error(`Unknown source type: ${sourceType}`)
   }
 
-  // Create job record
+  const liveMode = !adapter.isDemoMode
+  const liveModeReason = !liveMode
+    ? (adapter.demoReason ?? DEMO_REASONS[sourceType] ?? 'isDemoMode = true')
+    : undefined
+
+  // Create job record — metadata set once here; never overwritten on update
   const job = await db.crawlJob.create({
     data: {
       sourceType: sourceType as never,
       status: 'RUNNING',
       startedAt: new Date(),
-      metadata: (params ?? {}) as object,
+      metadata: {
+        ...(params ?? {}),
+        liveMode,
+        ...(liveModeReason ? { liveModeReason } : {}),
+      } as object,
     },
   })
 
@@ -84,6 +100,7 @@ export async function runJob(
       recordsCreated: result.created,
       recordsUpdated: result.updated,
       errorMessage: result.errors.length > 0 ? result.errors.join('; ') : undefined,
+      liveMode,
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
@@ -104,6 +121,7 @@ export async function runJob(
       recordsCreated: 0,
       recordsUpdated: 0,
       errorMessage,
+      liveMode,
     }
   }
 }

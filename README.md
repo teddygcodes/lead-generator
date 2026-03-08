@@ -128,7 +128,7 @@ lib/
     base.ts             SourceAdapter interface
     company-site.ts     Website enrichment adapter
     permits.ts          Permit adapter (demo mode — see below)
-    licenses.ts         License adapter (demo mode — see below)
+    business-registry.ts  Business Registry adapter (demo mode — see below)
   jobs/runner.ts        Job runner: invokes adapters, records CrawlJob
   validation/schemas.ts Centralized zod schemas (never inline)
 

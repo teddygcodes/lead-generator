@@ -23,6 +23,12 @@ export interface DetailResult {
 export interface NormalizedRecord {
   name: string
   normalizedName?: string
+  /**
+   * Internal DB company ID — set when adapter already knows the target company
+   * (e.g. enrichment/identity adapters that select candidates from the DB).
+   * Not set for permit/discovery adapters that create new companies.
+   */
+  companyId?: string
   domain?: string
   website?: string
   phone?: string
@@ -53,6 +59,15 @@ export interface SourceAdapter {
 
   /** Whether this adapter is running in demo mode (no live source) */
   isDemoMode: boolean
+
+  /**
+   * Actual current reason this adapter is in demo mode.
+   * Set by the adapter at initialization time; reflects real adapter state.
+   * Undefined when isDemoMode = false.
+   * Runner uses this as the primary source of truth; falls back to a static
+   * DEMO_REASONS table only when the adapter does not provide its own reason.
+   */
+  demoReason?: string
 
   /**
    * Discover available records from the source.

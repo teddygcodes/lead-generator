@@ -14,6 +14,43 @@ const CommitBodySchema = z.object({
   fieldMapping: z.record(z.string(), z.string()),
 })
 
+// Planned write operations — collected in read phase, executed atomically in write phase.
+type PlannedWrite =
+  | {
+      type: 'update'
+      companyId: string
+      data: {
+        website?: string
+        phone?: string
+        email?: string
+        street?: string
+        city?: string
+        state?: string
+        zip?: string
+        county?: string
+        lastSeenAt: Date
+      }
+    }
+  | {
+      type: 'create'
+      data: {
+        name: string
+        normalizedName: string
+        website?: string
+        domain?: string
+        phone?: string
+        email?: string
+        street?: string
+        city?: string
+        state: string
+        zip?: string
+        county?: string
+        leadScore: number
+        activeScore: number
+        lastSeenAt: Date
+      }
+    }
+
 // Commit — validates and writes to DB
 export async function POST(req: NextRequest) {
   const { userId } = await auth()
@@ -72,8 +109,10 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  let created = 0
-  let updated = 0
+  // --- Phase 1: Read + plan (no DB writes) ---
+  // Validate, normalize, and dedupe each row. Collect write operations to execute atomically.
+  // All DB reads happen here; writes are deferred to the transaction below.
+  const plannedWrites: PlannedWrite[] = []
   let skipped = 0
   let invalid = 0
   const errors: Array<{ row: number; error: string }> = []
@@ -135,23 +174,23 @@ export async function POST(req: NextRequest) {
           },
         )
 
-        await db.company.update({
-          where: { id: dedupeResult.companyId },
+        plannedWrites.push({
+          type: 'update',
+          companyId: dedupeResult.companyId,
           data: { ...merged, lastSeenAt: new Date() },
         })
-        updated++
       } else {
         // Create new company
-        const inputForScore = {
+        const score = scoreCompany({
           county: row.county,
           state: row.state,
           website: row.website,
           email: row.email,
           phone,
-        }
-        const score = scoreCompany(inputForScore)
+        })
 
-        await db.company.create({
+        plannedWrites.push({
+          type: 'create',
           data: {
             name: row.name,
             normalizedName: normalizedNameVal,
@@ -169,7 +208,6 @@ export async function POST(req: NextRequest) {
             lastSeenAt: new Date(),
           },
         })
-        created++
       }
     } catch (err) {
       errors.push({
@@ -178,6 +216,38 @@ export async function POST(req: NextRequest) {
       })
       invalid++
     }
+  }
+
+  // --- Phase 2: Execute all writes atomically ---
+  // If the server crashes here, no partial data is written.
+  // Acceptable for launch because imports are small/bounded; row-count limiting is P1.
+  const created = plannedWrites.filter((w) => w.type === 'create').length
+  const updated = plannedWrites.filter((w) => w.type === 'update').length
+
+  try {
+    await db.$transaction(async (tx) => {
+      for (const op of plannedWrites) {
+        if (op.type === 'update') {
+          await tx.company.update({ where: { id: op.companyId }, data: op.data })
+        } else {
+          await tx.company.create({ data: op.data })
+        }
+      }
+    })
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    await db.crawlJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errorMessage,
+      },
+    })
+    return NextResponse.json(
+      { error: 'Import failed — database write error', details: errorMessage },
+      { status: 500 },
+    )
   }
 
   await db.crawlJob.update({

@@ -68,3 +68,11 @@ export const EnrichBatchSchema = z.object({
   companyIds: z.array(z.string()).max(10).optional(),
   limit: z.coerce.number().int().min(1).max(10).default(5),
 })
+
+// ---- Run job ----
+// Note: "LICENSE" is the internal adapter registry key for the Business Registry adapter.
+// It is never exposed as a user-facing label — product surfaces use "Business Registry".
+export const RunJobSchema = z.object({
+  sourceType: z.enum(['COMPANY_WEBSITE', 'PERMIT', 'LICENSE']),
+  params: z.record(z.unknown()).optional(),
+})

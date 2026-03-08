@@ -1,14 +1,22 @@
 import { db } from '@/lib/db'
+import { cleanupStaleJobs } from '@/lib/jobs/cleanup'
 import { formatDate, formatDuration } from '@/lib/format'
 import { JobStatusBadge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 
 export const metadata = { title: 'Jobs — Electrical Leads Engine' }
 
+const JOB_DISPLAY_LIMIT = 500
+
 export default async function JobsPage() {
+  // v1 startup fallback: clean up stale RUNNING jobs on page load.
+  // Idempotent — safe to call on every render. Replace with Next.js instrumentation
+  // or a proper startup hook when one is added to the project.
+  await cleanupStaleJobs()
+
   const jobs = await db.crawlJob.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 100,
+    orderBy: { startedAt: 'desc' },
+    take: JOB_DISPLAY_LIMIT,
   })
 
   return (
@@ -116,6 +124,11 @@ export default async function JobsPage() {
             )
           })}
         </div>
+      )}
+      {jobs.length >= JOB_DISPLAY_LIMIT && (
+        <p className="mt-3 text-center text-xs text-gray-400">
+          Showing up to {JOB_DISPLAY_LIMIT} most recent jobs
+        </p>
       )}
     </div>
   )
