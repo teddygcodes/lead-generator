@@ -58,14 +58,18 @@ export function normalizeDomain(raw: string | null | undefined): string {
 export function normalizePhone(raw: string | null | undefined): string {
   if (!raw) return ''
   const digits = raw.replace(/\D/g, '')
-  // handle +1 country code
+  let local = ''
+  // handle +1 country code (11 digits)
   if (digits.length === 11 && digits.startsWith('1')) {
-    return digits.slice(1)
+    local = digits.slice(1)
+  } else if (digits.length === 10) {
+    local = digits
+  } else {
+    return ''
   }
-  if (digits.length === 10) {
-    return digits
-  }
-  return ''
+  // US area codes (NXX): N must be 2–9; exchange must also be 2–9
+  if (local[0] < '2' || local[3] < '2') return ''
+  return local
 }
 
 /**

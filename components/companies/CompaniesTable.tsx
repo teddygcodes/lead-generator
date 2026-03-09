@@ -470,7 +470,7 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
                   <StatusBadge status={company.status} />
                 </td>
                 <td className="table-cell-compact text-xs">
-                  {company.phone ? (
+                  {formatPhone(company.phone) ? (
                     <a
                       href={`tel:${company.phone}`}
                       className="text-gray-600 hover:text-blue-600"

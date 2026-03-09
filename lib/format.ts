@@ -50,8 +50,18 @@ export function formatDuration(start: Date | null, end: Date | null): string {
 export function formatPhone(phone: string | null | undefined): string {
   if (!phone) return ''
   const digits = phone.replace(/\D/g, '')
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+
+  let local = ''
+  if (digits.length === 11 && digits.startsWith('1')) {
+    local = digits.slice(1)
+  } else if (digits.length === 10) {
+    local = digits
+  } else {
+    return ''
   }
-  return phone
+
+  // US area codes (NXX) — N must be 2–9; exchange must also be 2–9
+  if (local[0] < '2' || local[3] < '2') return ''
+
+  return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
 }
