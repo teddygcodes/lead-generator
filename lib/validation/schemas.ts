@@ -67,7 +67,7 @@ export type ImportRow = z.infer<typeof ImportRowSchema>
 
 // ---- Enrich batch ----
 export const EnrichBatchSchema = z.object({
-  companyIds: z.array(z.string()).max(10).optional(),
+  companyIds: z.array(z.string()).max(50).optional(), // processing still capped by `limit` (max 10)
   limit: z.coerce.number().int().min(1).max(10).default(5),
 })
 
