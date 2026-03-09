@@ -144,6 +144,7 @@ export async function runFullEnrichment(companyId: string): Promise<PipelineResu
       email: updated.email,
       phone: updated.phone,
       street: updated.street,
+      sourceConfidence: updated.sourceConfidence,
       signals: updated.signals,
       contacts: updated.contacts,
     })

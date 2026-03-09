@@ -11,11 +11,15 @@ const STATUSES = [
   { value: 'ACTIVE', label: 'Active' },
   { value: 'INACTIVE', label: 'Inactive' },
 ]
+// Combined sort+order options — value encodes both as "field:direction"
 const SORT_OPTIONS = [
-  { value: 'leadScore', label: 'Lead Score' },
-  { value: 'name', label: 'Name' },
-  { value: 'lastEnrichedAt', label: 'Last Enriched' },
-  { value: 'createdAt', label: 'Date Added' },
+  { value: 'leadScore:desc', label: 'Score: High → Low' },
+  { value: 'leadScore:asc',  label: 'Score: Low → High' },
+  { value: 'name:asc',       label: 'Name: A → Z' },
+  { value: 'name:desc',      label: 'Name: Z → A' },
+  { value: 'lastEnrichedAt:desc', label: 'Recently Enriched' },
+  { value: 'createdAt:desc', label: 'Date Added: Newest' },
+  { value: 'createdAt:asc',  label: 'Date Added: Oldest' },
 ]
 
 interface FilterBarProps {
@@ -124,23 +128,22 @@ export function FilterBar({ counties }: FilterBarProps) {
       <div className="ml-auto flex items-center gap-2">
         <SlidersHorizontal size={13} className="text-gray-400" />
         <select
-          value={get('sort') || 'leadScore'}
-          onChange={(e) => setParam('sort', e.target.value)}
-          className="input-field h-7 text-xs w-32"
+          value={`${get('sort') || 'leadScore'}:${get('order') || 'desc'}`}
+          onChange={(e) => {
+            const [field, dir] = e.target.value.split(':')
+            const params = new URLSearchParams(searchParams.toString())
+            params.set('sort', field)
+            params.set('order', dir)
+            params.delete('page')
+            router.push(`${pathname}?${params.toString()}`)
+          }}
+          className="input-field h-7 text-xs w-44"
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
-        </select>
-        <select
-          value={get('order') || 'desc'}
-          onChange={(e) => setParam('order', e.target.value)}
-          className="input-field h-7 text-xs w-20"
-        >
-          <option value="desc">↓ Desc</option>
-          <option value="asc">↑ Asc</option>
         </select>
       </div>
     </div>

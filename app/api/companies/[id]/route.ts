@@ -46,6 +46,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     email: company.email,
     phone: company.phone,
     street: company.street,
+    sourceConfidence: company.sourceConfidence,
     signals: company.signals,
     contacts: company.contacts,
   })

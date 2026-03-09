@@ -4,6 +4,22 @@ import { db } from '@/lib/db'
 import { EnrichBatchSchema } from '@/lib/validation/schemas'
 import { runFullEnrichment } from '@/lib/enrichment/pipeline'
 
+// Returns all company IDs pending enrichment, ordered least-recently enriched first.
+// Used by the client to drive the "Enrich All" progress loop.
+export async function GET() {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const companies = await db.company.findMany({
+    where: { doNotContact: false, recordOrigin: { not: 'DEMO' } },
+    select: { id: true },
+    orderBy: { lastEnrichedAt: 'asc' },
+    take: 500, // safety cap — prevents absurdly large payloads
+  })
+
+  return NextResponse.json({ ids: companies.map((c) => c.id), total: companies.length })
+}
+
 export async function POST(req: NextRequest) {
   const { userId } = await auth()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
