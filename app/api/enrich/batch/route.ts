@@ -38,10 +38,10 @@ export async function POST(req: NextRequest) {
   // Find companies to enrich — includes companies without websites (Places fallback)
   let companies: Array<{ id: string; name: string }>
   if (companyIds && companyIds.length > 0) {
+    // Explicit selection — enrich all chosen companies, no cap
     companies = await db.company.findMany({
       where: { id: { in: companyIds }, doNotContact: false },
       select: { id: true, name: true },
-      take: limit,
     })
   } else {
     // Least-recently enriched real companies — with or without websites
