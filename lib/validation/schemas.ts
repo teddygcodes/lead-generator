@@ -71,6 +71,11 @@ export const EnrichBatchSchema = z.object({
   limit: z.coerce.number().int().min(1).max(10).default(5),
 })
 
+// ---- Delete batch ----
+export const DeleteBatchSchema = z.object({
+  companyIds: z.array(z.string()).min(1).max(50),
+})
+
 // ---- Run job ----
 // Note: "LICENSE" is the internal adapter registry key for the Business Registry adapter.
 // It is never exposed as a user-facing label — product surfaces use "Business Registry".

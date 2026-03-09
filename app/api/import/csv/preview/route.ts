@@ -7,25 +7,34 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
 const KNOWN_ALIASES: Record<string, string> = {
   company: 'name',
   'company name': 'name',
+  company_name: 'name',
   'business name': 'name',
+  business_name: 'name',
   organization: 'name',
   org: 'name',
   url: 'website',
   site: 'website',
   web: 'website',
   'web site': 'website',
+  web_site: 'website',
   tel: 'phone',
   telephone: 'phone',
   mobile: 'phone',
+  phone_number: 'phone',
   'e-mail': 'email',
   'email address': 'email',
+  email_address: 'email',
   addr: 'street',
   address: 'street',
   'street address': 'street',
+  street_address: 'street',
   town: 'city',
   'postal code': 'zip',
   'zip code': 'zip',
+  zip_code: 'zip',
+  postal_code: 'zip',
   'state/province': 'state',
+  state_province: 'state',
   region: 'county',
 }
 
@@ -100,21 +109,12 @@ export async function POST(req: NextRequest) {
     (h) => !KNOWN_ALIASES[h.trim().toLowerCase()] && h.trim().toLowerCase() !== 'name',
   )
 
-  // Return preview of first 25 rows
-  const preview = rows.slice(0, 25).map((row) => {
-    const normalized: Record<string, string> = {}
-    for (const [orig, val] of Object.entries(row)) {
-      normalized[normalizeHeader(orig)] = val
-    }
-    return normalized
-  })
-
   return NextResponse.json({
-    totalRows: rows.length,
-    previewRows: preview,
-    originalHeaders,
+    rowCount: rows.length,
+    rows: rows.slice(0, 25),
+    headers: originalHeaders,
     normalizedHeaders,
-    headerMapping,
+    suggestedMapping: headerMapping,
     needsMapping,
     autoMapped: autoMapped.map(([orig]) => orig),
   })

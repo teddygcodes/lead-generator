@@ -36,12 +36,12 @@ function buildSystemMessage(): string {
   )
 }
 
-function buildUserMessage(companyName: string, extractedText: string): string {
+function buildUserMessage(companyName: string, extractedText: string, dataSource = 'Website content'): string {
   return `Analyze this electrical contractor for sales intelligence.
 
 Company: ${companyName}
 
-Website content:
+${dataSource}:
 ${extractedText.slice(0, 5000)}
 
 Return a JSON object with these exact fields. If evidence is weak, omit optional fields rather than guessing. Do not repeat the same information across fields. Do not put segment names (industrial, commercial, residential) in the specialties array — specialties are specific capabilities, not market segments.
@@ -207,9 +207,10 @@ function keywordFallback(extractedText: string, companyName: string): AIEnrichme
 export async function enrichWithAI(
   companyName: string,
   extractedText: string,
+  dataSource = 'Website content',
 ): Promise<{ output: AIEnrichmentOutput; usedFallback: boolean }> {
   const system = buildSystemMessage()
-  const userMessage = buildUserMessage(companyName, extractedText)
+  const userMessage = buildUserMessage(companyName, extractedText, dataSource)
   const rawResponse = await callAI(system, userMessage)
   const parsed = parseAIOutput(rawResponse)
 
