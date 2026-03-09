@@ -341,7 +341,7 @@ export async function enrichCompany(
           sourceUrl: websiteUrl,
           title: payload.title || 'Website content extracted',
           snippet: payload.description?.slice(0, 500) || payload.extractedText.slice(0, 500),
-          rawText: payload.extractedText.slice(0, 2000),
+          rawText: payload.extractedText.slice(0, 5000),
           signalType: 'WEBSITE_CONTENT',
           signalDate: new Date(),
           relevanceScore: classification.confidence,

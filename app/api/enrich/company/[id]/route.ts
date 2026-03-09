@@ -15,7 +15,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const company = await db.company.findUnique({
     where: { id },
-    select: { id: true, name: true, website: true },
+    select: { id: true, name: true, website: true, notes: true },
   })
 
   if (!company) {
@@ -45,6 +45,14 @@ export async function POST(_req: NextRequest, { params }: Params) {
   if (textForAI) {
     const { output, usedFallback } = await enrichWithAI(company.name, textForAI)
 
+    const existingNotes = company.notes?.trim()
+    const buyerProfile = output.likelyBuyerProfile?.trim()
+    const followUpAngle = output.recommendedFollowUpAngle?.trim()
+    const aiNotes =
+      buyerProfile && followUpAngle
+        ? `Buyer profile: ${buyerProfile}\n\nOutreach angle: ${followUpAngle}`
+        : undefined
+
     // Update company with AI-derived fields
     await db.company.update({
       where: { id },
@@ -53,6 +61,9 @@ export async function POST(_req: NextRequest, { params }: Params) {
         specialties: output.specialties.length > 0 ? output.specialties : undefined,
         description: output.summary || undefined,
         sourceConfidence: output.confidence,
+        serviceAreas: output.serviceAreas.length > 0 ? output.serviceAreas : undefined,
+        employeeSizeEstimate: output.employeeSizeEstimate ?? undefined,
+        notes: !existingNotes && aiNotes ? aiNotes : undefined,
       },
     })
 

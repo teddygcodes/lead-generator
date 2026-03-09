@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Building2 } from 'lucide-react'
 import type { Prisma } from '@prisma/client'
 import { EnrichAllButton } from '@/components/companies/EnrichAllButton'
+import { FindWebsitesButton } from '@/components/companies/FindWebsitesButton'
 
 export const metadata = { title: 'Companies — Electrical Leads Engine' }
 
@@ -119,7 +120,10 @@ export default async function CompaniesPage({
             {showDemo === 'true' ? ' (including demo data)' : ''}
           </p>
         </div>
-        <EnrichAllButton />
+        <div className="flex items-start gap-2">
+          <FindWebsitesButton />
+          <EnrichAllButton />
+        </div>
       </div>
 
       <FilterBar counties={counties} />
