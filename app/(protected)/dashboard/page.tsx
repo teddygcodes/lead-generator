@@ -10,6 +10,8 @@ async function getDashboardData() {
   const weekAgo = new Date()
   weekAgo.setDate(weekAgo.getDate() - 7)
 
+  const realOnly = { recordOrigin: { not: 'DEMO' as const } }
+
   const [
     totalCompanies,
     signalsThisWeek,
@@ -17,13 +19,14 @@ async function getDashboardData() {
     recentSignals,
     recentImports,
   ] = await Promise.all([
-    db.company.count(),
-    db.signal.count({ where: { createdAt: { gte: weekAgo } } }),
+    db.company.count({ where: realOnly }),
+    db.signal.count({ where: { createdAt: { gte: weekAgo }, company: realOnly } }),
     db.crawlJob.findMany({
       orderBy: { createdAt: 'desc' },
       take: 5,
     }),
     db.signal.findMany({
+      where: { company: realOnly },
       orderBy: { createdAt: 'desc' },
       take: 10,
       include: { company: { select: { id: true, name: true } } },
@@ -44,6 +47,12 @@ export default async function DashboardPage() {
         <h1 className="text-base font-semibold text-gray-900">Dashboard</h1>
         <p className="text-xs text-gray-500 mt-0.5">Atlanta metro &amp; North Georgia contractor intelligence</p>
       </div>
+
+      {totalCompanies === 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          No real leads yet — run a Company Discovery job or import via CSV to populate your pipeline.
+        </div>
+      )}
 
       {/* Summary row */}
       <div className="grid grid-cols-3 gap-3">

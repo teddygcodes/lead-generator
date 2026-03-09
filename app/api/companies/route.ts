@@ -27,9 +27,14 @@ export async function GET(req: NextRequest) {
     order,
     page,
     limit,
+    showDemo,
   } = parsed.data
 
   const where: Prisma.CompanyWhereInput = {}
+
+  if (showDemo !== 'true') {
+    where.recordOrigin = { not: 'DEMO' as const }
+  }
 
   if (search) {
     where.OR = [
