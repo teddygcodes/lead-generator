@@ -3,6 +3,9 @@
     "allow": [
       "Skill(commit-commands:commit-push-pr)",
       "Skill(commit-commands:commit-push-pr:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/tylergilstrap/Desktop/Lead Generator"
     ]
   }
 }
