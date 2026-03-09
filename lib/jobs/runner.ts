@@ -8,11 +8,13 @@ import type { SourceAdapter } from '@/lib/sources/base'
 import { companySiteAdapter } from '@/lib/sources/company-site'
 import { permitAdapter } from '@/lib/sources/permits'
 import { licenseAdapter } from '@/lib/sources/business-registry'
+import { companyDiscoveryAdapter } from '@/lib/sources/company-discovery'
 
 const ADAPTERS: Record<string, SourceAdapter> = {
   COMPANY_WEBSITE: companySiteAdapter,
   PERMIT: permitAdapter,
   LICENSE: licenseAdapter,
+  COMPANY_DISCOVERY: companyDiscoveryAdapter,
 }
 
 export interface RunJobResult {

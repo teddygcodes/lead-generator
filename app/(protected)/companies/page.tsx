@@ -6,6 +6,7 @@ import { FilterBar } from '@/components/companies/FilterBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Building2 } from 'lucide-react'
 import type { Prisma } from '@prisma/client'
+import { EnrichAllButton } from '@/components/companies/EnrichAllButton'
 
 export const metadata = { title: 'Companies — Electrical Leads Engine' }
 
@@ -15,10 +16,15 @@ async function getCompanies(searchParams: Record<string, string>) {
     return buildPaginatedResponse([], 0, 1, 25)
   }
 
-  const { search, county, segment, status, minScore, hasWebsite, hasEmail, sort, order, page, limit } =
+  const { search, county, segment, status, minScore, hasWebsite, hasEmail, sort, order, page, limit, showDemo } =
     parsed.data
 
   const where: Prisma.CompanyWhereInput = {}
+
+  if (showDemo !== 'true') {
+    where.recordOrigin = { not: 'DEMO' as const }
+  }
+
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -68,10 +74,14 @@ async function getCompanies(searchParams: Record<string, string>) {
   return buildPaginatedResponse(companies, total, page, limit)
 }
 
-// Get distinct counties for filter
-async function getCounties(): Promise<string[]> {
+// Get distinct counties for filter — excludes demo-only counties by default
+async function getCounties(showDemo: string): Promise<string[]> {
+  const where: Prisma.CompanyWhereInput = { county: { not: null } }
+  if (showDemo !== 'true') {
+    where.recordOrigin = { not: 'DEMO' as const }
+  }
   const result = await db.company.findMany({
-    where: { county: { not: null } },
+    where,
     select: { county: true },
     distinct: ['county'],
     orderBy: { county: 'asc' },
@@ -85,7 +95,19 @@ export default async function CompaniesPage({
   searchParams: Promise<Record<string, string>>
 }) {
   const params = await searchParams
-  const [result, counties] = await Promise.all([getCompanies(params), getCounties()])
+  const showDemo = params.showDemo ?? 'false'
+  const [result, counties] = await Promise.all([getCompanies(params), getCounties(showDemo)])
+
+  const hasActiveFilters = Object.keys(params).some((k) =>
+    ['search', 'county', 'segment', 'status'].includes(k),
+  )
+
+  const emptyDescription =
+    hasActiveFilters
+      ? 'Try adjusting your filters or search term.'
+      : showDemo === 'true'
+        ? 'No companies found. Import companies via CSV or add them manually to get started.'
+        : 'No real leads yet — run a Company Discovery job or import via CSV.'
 
   return (
     <div className="space-y-3">
@@ -94,8 +116,10 @@ export default async function CompaniesPage({
           <h1 className="text-base font-semibold text-gray-900">Companies</h1>
           <p className="text-xs text-gray-500 mt-0.5">
             {result.total.toLocaleString()} {result.total === 1 ? 'company' : 'companies'}
+            {showDemo === 'true' ? ' (including demo data)' : ''}
           </p>
         </div>
+        <EnrichAllButton />
       </div>
 
       <FilterBar counties={counties} />
@@ -104,11 +128,7 @@ export default async function CompaniesPage({
         <EmptyState
           icon={<Building2 size={32} />}
           title="No companies found"
-          description={
-            Object.keys(params).some((k) => ['search', 'county', 'segment', 'status'].includes(k))
-              ? 'Try adjusting your filters or search term.'
-              : 'Import companies via CSV or add them manually to get started.'
-          }
+          description={emptyDescription}
         />
       ) : (
         <CompaniesTable

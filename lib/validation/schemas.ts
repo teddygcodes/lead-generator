@@ -26,6 +26,8 @@ export const CompanyFiltersSchema = z.object({
     .enum(['name', 'leadScore', 'lastEnrichedAt', 'createdAt'])
     .default('leadScore'),
   order: z.enum(['asc', 'desc']).default('desc'),
+  // showDemo=true reveals demo seed data; default false hides it from the normal lead view
+  showDemo: z.enum(['true', 'false']).default('false'),
   ...PaginationSchema.shape,
 })
 
@@ -73,6 +75,6 @@ export const EnrichBatchSchema = z.object({
 // Note: "LICENSE" is the internal adapter registry key for the Business Registry adapter.
 // It is never exposed as a user-facing label — product surfaces use "Business Registry".
 export const RunJobSchema = z.object({
-  sourceType: z.enum(['COMPANY_WEBSITE', 'PERMIT', 'LICENSE']),
+  sourceType: z.enum(['COMPANY_WEBSITE', 'PERMIT', 'LICENSE', 'COMPANY_DISCOVERY']),
   params: z.record(z.unknown()).optional(),
 })

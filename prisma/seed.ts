@@ -43,6 +43,7 @@ async function main() {
       leadScore: 88,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -67,6 +68,7 @@ async function main() {
       leadScore: 82,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -91,6 +93,7 @@ async function main() {
       leadScore: 65,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -115,6 +118,7 @@ async function main() {
       leadScore: 79,
       status: 'QUALIFYING',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -139,6 +143,7 @@ async function main() {
       leadScore: 92,
       status: 'QUALIFYING',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -163,6 +168,7 @@ async function main() {
       leadScore: 55,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     // ── COMMERCIAL (6) ───────────────────────────────────────────────────────
@@ -188,6 +194,7 @@ async function main() {
       leadScore: 76,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -212,6 +219,7 @@ async function main() {
       leadScore: 71,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -236,6 +244,7 @@ async function main() {
       leadScore: 60,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -260,6 +269,7 @@ async function main() {
       leadScore: 84,
       status: 'QUALIFYING',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -284,6 +294,7 @@ async function main() {
       leadScore: 42,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -308,6 +319,7 @@ async function main() {
       leadScore: 73,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     // ── RESIDENTIAL (6) ──────────────────────────────────────────────────────
@@ -333,6 +345,7 @@ async function main() {
       leadScore: 30,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -357,6 +370,7 @@ async function main() {
       leadScore: 28,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -381,6 +395,7 @@ async function main() {
       leadScore: 20,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -405,6 +420,7 @@ async function main() {
       leadScore: 14,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -429,6 +445,7 @@ async function main() {
       leadScore: 29,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -453,6 +470,7 @@ async function main() {
       leadScore: 26,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     // ── MIXED / OVERLAP (6) ──────────────────────────────────────────────────
@@ -478,6 +496,7 @@ async function main() {
       leadScore: 80,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -502,6 +521,7 @@ async function main() {
       leadScore: 45,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -526,6 +546,7 @@ async function main() {
       leadScore: 83,
       status: 'QUALIFYING',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -550,6 +571,7 @@ async function main() {
       leadScore: 90,
       status: 'QUALIFYING',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -574,6 +596,7 @@ async function main() {
       leadScore: 68,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
 
     prisma.company.create({ data: {
@@ -598,6 +621,7 @@ async function main() {
       leadScore: 50,
       status: 'NEW',
       doNotContact: false,
+      recordOrigin: 'DEMO',
     }}),
   ])
 

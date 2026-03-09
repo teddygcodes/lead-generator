@@ -4,17 +4,19 @@
  * Trigger a source adapter job run.
  * Requires a valid Clerk session.
  *
- * Body: { sourceType: "COMPANY_WEBSITE" | "PERMIT" | "LICENSE", params?: object }
+ * Body: { sourceType: "COMPANY_WEBSITE" | "PERMIT" | "LICENSE" | "COMPANY_DISCOVERY", params?: object }
  *
  * Note on sourceType values:
- *   - "COMPANY_WEBSITE" → website enrichment adapter
- *   - "PERMIT"          → permit adapter (demo mode; see permits.ts step 0 comment)
- *   - "LICENSE"         → Business Registry adapter (internal adapter key — never expose
- *                         this string in UI labels; product surfaces use "Business Registry")
+ *   - "COMPANY_WEBSITE"    → website enrichment adapter
+ *   - "PERMIT"             → permit adapter (demo mode; see permits.ts step 0 comment)
+ *   - "LICENSE"            → Business Registry adapter (internal adapter key — never expose
+ *                            this string in UI labels; product surfaces use "Business Registry")
+ *   - "COMPANY_DISCOVERY"  → GA electrical contractor discovery (Atlanta Accela permit search + future sources)
  *
  * Server-side param caps applied before passing to adapter (body values cannot override):
- *   - LICENSE:  batchLimit capped at 50
- *   - PERMIT:   resultRecordCount capped at 1000
+ *   - LICENSE:           batchLimit capped at 50
+ *   - PERMIT:            resultRecordCount capped at 1000
+ *   - COMPANY_DISCOVERY: maxPages capped at 5
  *
  * Response: RunJobResult
  *   liveMode: true  → adapter ran against a live external source
@@ -67,6 +69,11 @@ export async function POST(req: NextRequest) {
   if (sourceType === 'PERMIT') {
     if (typeof params.resultRecordCount === 'number' && params.resultRecordCount > 1000) {
       params.resultRecordCount = 1000
+    }
+  }
+  if (sourceType === 'COMPANY_DISCOVERY') {
+    if (typeof params.maxPages === 'number' && params.maxPages > 5) {
+      params.maxPages = 5
     }
   }
 

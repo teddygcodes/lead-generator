@@ -20,14 +20,14 @@ type PlannedWrite =
       type: 'update'
       companyId: string
       data: {
-        website?: string
-        phone?: string
-        email?: string
-        street?: string
-        city?: string
-        state?: string
-        zip?: string
-        county?: string
+        website?: string | null
+        phone?: string | null
+        email?: string | null
+        street?: string | null
+        city?: string | null
+        state?: string | null
+        zip?: string | null
+        county?: string | null
         lastSeenAt: Date
       }
     }
@@ -48,6 +48,7 @@ type PlannedWrite =
         leadScore: number
         activeScore: number
         lastSeenAt: Date
+        recordOrigin: 'IMPORTED'
       }
     }
 
@@ -206,6 +207,7 @@ export async function POST(req: NextRequest) {
             leadScore: score.leadScore,
             activeScore: score.activeScore,
             lastSeenAt: new Date(),
+            recordOrigin: 'IMPORTED',
           },
         })
       }
