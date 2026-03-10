@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.7",
+    "@googlemaps/js-api-loader": "^2.0.2",
     "@prisma/client": "^5.22.0",
     "csv-parse": "^5.5.6",
     "lucide-react": "^0.469.0",
@@ -24,9 +25,11 @@
     "node-html-parser": "^6.1.13",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "rss-parser": "^3.13.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/google.maps": "^3.58.1",
     "@types/node": "^22.10.7",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",

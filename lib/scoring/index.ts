@@ -10,6 +10,7 @@ export interface ScoringInput {
   email?: string | null
   phone?: string | null
   street?: string | null
+  sourceConfidence?: number | null // AI enrichment confidence (0-1), stored on Company.sourceConfidence
   signals?: Array<{
     signalDate?: Date | null
     signalType?: string
@@ -61,30 +62,33 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
   }
 
   // ---- Segment ----
+  // Industrial always receives full industrial points, even when mixed with other segments.
+  // The "mixed" value only applies to non-industrial multi-segment combos.
   const segments = (input.segments ?? []).map((s) => s.toLowerCase())
   const hasIndustrial = segments.includes('industrial')
   const hasCommercial = segments.includes('commercial')
   const hasResidential = segments.includes('residential')
   const segmentCount = [hasIndustrial, hasCommercial, hasResidential].filter(Boolean).length
 
-  if (hasIndustrial && segmentCount === 1) {
+  if (hasIndustrial) {
     lead += SCORE_CONFIG.segment.industrial
-    reasons.push('Primarily industrial — high-value segment for switchgear/panelboard demand')
-  } else if (hasIndustrial) {
-    lead += SCORE_CONFIG.segment.mixed
-    reasons.push('Industrial segment present among mixed work types')
+    reasons.push(
+      segmentCount === 1
+        ? 'Primarily industrial — high-value segment for switchgear/panelboard demand'
+        : `Industrial segment present (multi-segment: ${segments.join(', ')})`,
+    )
   } else if (hasCommercial && segmentCount === 1) {
     lead += SCORE_CONFIG.segment.commercial
     reasons.push('Primarily commercial — strong panelboard and lighting demand')
   } else if (segmentCount > 1) {
     lead += SCORE_CONFIG.segment.mixed
-    reasons.push(`Multi-segment contractor: ${segments.join(', ')}`)
+    reasons.push(`Multi-segment contractor (non-industrial): ${segments.join(', ')}`)
   } else if (hasResidential) {
     lead += SCORE_CONFIG.segment.residential
     reasons.push('Residential segment — lower product complexity demand')
   }
 
-  // ---- Specialties ----
+  // ---- Specialties — per-match scoring, capped ----
   const specialties = (input.specialties ?? []).map((s) => s.toLowerCase())
   const matchedHighValue = SCORE_CONFIG.specialties.highValue.filter((kw) =>
     specialties.some((s) => s.includes(kw)),
@@ -93,12 +97,24 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
     specialties.some((s) => s.includes(kw)),
   )
   if (matchedHighValue.length > 0) {
-    lead += SCORE_CONFIG.specialties.highValuePoints
-    reasons.push(`High-value specialty detected: ${matchedHighValue.join(', ')}`)
+    const pts = Math.min(
+      matchedHighValue.length * SCORE_CONFIG.specialties.highValuePointsEach,
+      SCORE_CONFIG.specialties.highValueMax,
+    )
+    lead += pts
+    reasons.push(
+      `${matchedHighValue.length} high-value specialty match(es): ${matchedHighValue.join(', ')} (+${pts})`,
+    )
   }
   if (matchedStandard.length > 0) {
-    lead += SCORE_CONFIG.specialties.standardPoints
-    reasons.push(`Standard specialty detected: ${matchedStandard.join(', ')}`)
+    const pts = Math.min(
+      matchedStandard.length * SCORE_CONFIG.specialties.standardPointsEach,
+      SCORE_CONFIG.specialties.standardMax,
+    )
+    lead += pts
+    reasons.push(
+      `${matchedStandard.length} standard specialty match(es): ${matchedStandard.join(', ')} (+${pts})`,
+    )
   }
 
   // ---- Description language ----
@@ -135,6 +151,16 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
     lead += SCORE_CONFIG.completeness.hasStreetAddress
   }
 
+  // ---- Source confidence (AI enrichment quality) ----
+  const conf = input.sourceConfidence ?? 0
+  if (conf >= SCORE_CONFIG.confidence.highThreshold) {
+    lead += SCORE_CONFIG.confidence.highPoints
+    reasons.push(`High AI enrichment confidence (${conf.toFixed(2)}) — data quality verified`)
+  } else if (conf >= SCORE_CONFIG.confidence.mediumThreshold) {
+    lead += SCORE_CONFIG.confidence.mediumPoints
+    reasons.push(`Moderate AI enrichment confidence (${conf.toFixed(2)})`)
+  }
+
   // ---- Contacts ----
   const contacts = input.contacts ?? []
   if (contacts.length > 0) {
@@ -149,7 +175,7 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
     }
   }
 
-  // ---- Active score (signal recency and volume) ----
+  // ---- Signals (activeScore: volume + recency; leadScore: small presence bonus) ----
   const signals = input.signals ?? []
   const now = new Date()
   let signalBonus = 0
@@ -166,7 +192,15 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
   signalBonus = Math.min(signalBonus, SCORE_CONFIG.signals.maxSignalBonus)
   active += signalBonus
 
-  if (signals.length > 0) {
+  // Small leadScore bonus for signal presence — signals indicate active, visible company
+  const leadSignalBonus = Math.min(
+    signals.length * SCORE_CONFIG.signals.leadScorePerSignal,
+    SCORE_CONFIG.signals.leadScoreSignalMax,
+  )
+  if (leadSignalBonus > 0) {
+    lead += leadSignalBonus
+    reasons.push(`${signals.length} signal(s) on file (+${leadSignalBonus} to lead score)`)
+  } else if (signals.length > 0) {
     reasons.push(`${signals.length} signal(s) on file`)
   }
 

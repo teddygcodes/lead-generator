@@ -18,6 +18,8 @@ export const AIEnrichmentSchema = z.object({
   primarySegment: z.enum(['industrial', 'commercial', 'residential', 'mixed']),
   secondarySegments: z.array(z.string()).default([]),
   specialties: z.array(z.string()).default([]),
+  serviceAreas: z.array(z.string()).default([]),
+  employeeSizeEstimate: z.enum(['1-5', '6-20', '21-50', '50+']).optional(),
   summary: z.string().max(1000),
   likelyBuyerProfile: z.string().max(500),
   confidence: z.number().min(0).max(1),
@@ -26,29 +28,83 @@ export const AIEnrichmentSchema = z.object({
 
 export type AIEnrichmentOutput = z.infer<typeof AIEnrichmentSchema>
 
-function buildPrompt(companyName: string, extractedText: string): string {
-  return `You are analyzing an electrical contractor company for sales intelligence purposes.
+function buildSystemMessage(): string {
+  return (
+    'You are a B2B sales intelligence analyst specializing in the electrical contractor market ' +
+    'in Atlanta metro and North Georgia. You help electrical supply reps prioritize and tailor ' +
+    'outreach to contractor accounts. Return only valid JSON — no markdown, no explanation.'
+  )
+}
+
+function buildUserMessage(companyName: string, extractedText: string, dataSource = 'Website content'): string {
+  return `Analyze this electrical contractor for sales intelligence.
 
 Company: ${companyName}
 
-Extracted website text (first 3000 chars):
-${extractedText.slice(0, 3000)}
+${dataSource}:
+${extractedText.slice(0, 5000)}
 
-Return a JSON object with these exact fields:
+Return a JSON object with these exact fields. If evidence is weak, omit optional fields rather than guessing. Do not repeat the same information across fields. Do not put segment names (industrial, commercial, residential) in the specialties array — specialties are specific capabilities, not market segments.
+
 {
-  "primarySegment": one of: "industrial" | "commercial" | "residential" | "mixed",
-  "secondarySegments": array of strings (e.g. ["industrial", "commercial"]),
-  "specialties": array of electrical specialties mentioned (e.g. ["switchgear", "panelboards", "lighting"]),
-  "summary": 2-3 sentence summary of what this contractor does and who they serve,
-  "likelyBuyerProfile": describe the likely purchasing decision maker (e.g. "Owner/operator, 5-20 employees, handles procurement directly"),
-  "confidence": number 0-1 indicating your confidence in this classification,
-  "recommendedFollowUpAngle": specific opening angle for a sales rep to use in first outreach
+  "primarySegment": "industrial" | "commercial" | "residential" | "mixed",
+    // industrial = factories, warehouses, manufacturing, data centers
+    // commercial = offices, retail, restaurants, hotels, medical buildings
+    // residential = homes, apartments, condos, subdivisions
+    // mixed = clearly serves multiple with roughly equal focus
+
+  "secondarySegments": string[],
+    // other segments they serve; empty array if single-focus
+
+  "specialties": string[],
+    // specific electrical capabilities explicitly stated or clearly demonstrated:
+    // switchgear, panelboards, lighting controls, generators, service/maintenance,
+    // low voltage, fire alarm, EV charging, etc.
+    // Do not include generic terms or segment names
+
+  "serviceAreas": string[],
+    // Georgia counties or cities explicitly listed, labeled as service areas,
+    // or repeatedly mentioned in a coverage context
+    // ("serving North Georgia", branch office pages, service area maps)
+    // Do NOT infer from a single office address alone or one project mention
+    // Only include Georgia locations — ignore out-of-state unless clearly the primary footprint
+    // Return empty array if not clearly stated
+
+  "employeeSizeEstimate": "1-5" | "6-20" | "21-50" | "50+",
+    // Infer conservatively from explicit evidence:
+    //   "1-5": sole proprietor, owner-operator language, single-person copy
+    //   "6-20": "our team", a few project photos, small crew references
+    //   "21-50": multiple crews, divisions, active job listings, bonded capacity
+    //   "50+": large fleet, multiple offices, major commercial portfolio
+    // OMIT THIS FIELD entirely if the website gives insufficient evidence
+
+  "summary": string,
+    // 2-3 sentences: what they do, who they serve, any notable capabilities
+    // Do not repeat content from specialties or serviceAreas
+
+  "likelyBuyerProfile": string,
+    // Who controls material purchasing and how decisions are made
+    // Base on website evidence and common contractor patterns only
+    // If unclear, keep it brief and conservative — do not invent org structures
+    // e.g. "Owner/operator handles all procurement directly"
+    // e.g. "Project manager per job; owner approves large-ticket items"
+
+  "confidence": number (0.0 to 1.0),
+    // Based on: amount of usable website content, clarity of segment cues,
+    // whether specialties were explicit vs inferred, geographic specificity
+    // Use 0.8+ only when content is rich and classification is unambiguous
+
+  "recommendedFollowUpAngle": string
+    // Specific, operational opening for an electrical supply rep
+    // Must reference likely material categories, project type, or buying pattern
+    // Do NOT claim specific manufacturer preferences unless the website strongly supports them
+    // e.g. "Their heavy commercial focus suggests significant panel/breaker volume —
+    //       ask what distribution channels they currently use"
+    // No generic intros ("introduce yourself", "schedule a meeting")
+}`
 }
 
-Return ONLY the JSON object, no explanation or markdown.`
-}
-
-async function callAnthropic(prompt: string): Promise<string | null> {
+async function callAnthropic(system: string, userMessage: string): Promise<string | null> {
   if (!ANTHROPIC_API_KEY) return null
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -61,7 +117,9 @@ async function callAnthropic(prompt: string): Promise<string | null> {
       body: JSON.stringify({
         model: AI_MODEL,
         max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+        system,
+        messages: [{ role: 'user', content: userMessage }],
       }),
     })
     if (!res.ok) return null
@@ -72,7 +130,7 @@ async function callAnthropic(prompt: string): Promise<string | null> {
   }
 }
 
-async function callOpenAI(prompt: string): Promise<string | null> {
+async function callOpenAI(system: string, userMessage: string): Promise<string | null> {
   if (!OPENAI_API_KEY) return null
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -83,9 +141,12 @@ async function callOpenAI(prompt: string): Promise<string | null> {
       },
       body: JSON.stringify({
         model: AI_MODEL || 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage },
+        ],
         max_tokens: 1024,
-        temperature: 0.1,
+        temperature: 0,
       }),
     })
     if (!res.ok) return null
@@ -100,9 +161,9 @@ async function callOpenAI(prompt: string): Promise<string | null> {
  * Call the configured AI provider.
  * Returns raw text response or null if unavailable.
  */
-async function callAI(prompt: string): Promise<string | null> {
-  if (AI_PROVIDER === 'openai') return callOpenAI(prompt)
-  return callAnthropic(prompt)
+async function callAI(system: string, userMessage: string): Promise<string | null> {
+  if (AI_PROVIDER === 'openai') return callOpenAI(system, userMessage)
+  return callAnthropic(system, userMessage)
 }
 
 /**
@@ -131,6 +192,7 @@ function keywordFallback(extractedText: string, companyName: string): AIEnrichme
     primarySegment: classification.segment,
     secondarySegments: classification.segments,
     specialties: classification.matchedSpecialties,
+    serviceAreas: [],
     summary: `${companyName} is a ${classification.segment} electrical contractor. Classification based on keyword analysis.`,
     likelyBuyerProfile: 'Assess at first contact — classification confidence is low without AI enrichment',
     confidence: classification.confidence * 0.6, // lower confidence for fallback
@@ -145,9 +207,11 @@ function keywordFallback(extractedText: string, companyName: string): AIEnrichme
 export async function enrichWithAI(
   companyName: string,
   extractedText: string,
+  dataSource = 'Website content',
 ): Promise<{ output: AIEnrichmentOutput; usedFallback: boolean }> {
-  const prompt = buildPrompt(companyName, extractedText)
-  const rawResponse = await callAI(prompt)
+  const system = buildSystemMessage()
+  const userMessage = buildUserMessage(companyName, extractedText, dataSource)
+  const rawResponse = await callAI(system, userMessage)
   const parsed = parseAIOutput(rawResponse)
 
   if (parsed) {

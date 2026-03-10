@@ -46,11 +46,24 @@ export async function GET(_req: NextRequest, { params }: Params) {
     email: company.email,
     phone: company.phone,
     street: company.street,
+    sourceConfidence: company.sourceConfidence,
     signals: company.signals,
     contacts: company.contacts,
   })
 
   return NextResponse.json({ ...company, scoreDetails: score })
+}
+
+export async function DELETE(_req: NextRequest, { params }: Params) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { id } = await params
+  const existing = await db.company.findUnique({ where: { id }, select: { id: true } })
+  if (!existing) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
+
+  await db.company.delete({ where: { id } })
+  return NextResponse.json({ success: true })
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {

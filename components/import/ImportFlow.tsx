@@ -72,7 +72,13 @@ export function ImportFlow() {
         return
       }
       setPreview(data)
-      setMapping(data.suggestedMapping ?? {})
+      // Normalize suggested mapping — unknown target fields default to '__skip'
+      const validValues = new Set(KNOWN_FIELDS.map((f) => f.value))
+      const normalized: Record<string, string> = {}
+      for (const [orig, mapped] of Object.entries(data.suggestedMapping ?? {})) {
+        normalized[orig] = validValues.has(mapped as string) ? (mapped as string) : '__skip'
+      }
+      setMapping(normalized)
       setStage('preview')
     } catch {
       setError('Network error during preview.')

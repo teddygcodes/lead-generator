@@ -6,7 +6,6 @@ import { FilterBar } from '@/components/companies/FilterBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Building2 } from 'lucide-react'
 import type { Prisma } from '@prisma/client'
-import { EnrichAllButton } from '@/components/companies/EnrichAllButton'
 
 export const metadata = { title: 'Companies — Electrical Leads Engine' }
 
@@ -65,6 +64,9 @@ async function getCompanies(searchParams: Record<string, string>) {
         status: true,
         lastEnrichedAt: true,
         doNotContact: true,
+        employeeSizeEstimate: true,
+        description: true,
+        serviceAreas: true,
         _count: { select: { signals: true } },
       },
     }),
@@ -111,15 +113,12 @@ export default async function CompaniesPage({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-base font-semibold text-gray-900">Companies</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {result.total.toLocaleString()} {result.total === 1 ? 'company' : 'companies'}
-            {showDemo === 'true' ? ' (including demo data)' : ''}
-          </p>
-        </div>
-        <EnrichAllButton />
+      <div>
+        <h1 className="text-base font-semibold text-gray-900">Companies</h1>
+        <p className="text-xs text-gray-500 mt-0.5">
+          {result.total.toLocaleString()} {result.total === 1 ? 'company' : 'companies'}
+          {showDemo === 'true' ? ' (including demo data)' : ''}
+        </p>
       </div>
 
       <FilterBar counties={counties} />

@@ -12,14 +12,16 @@ export const SCORE_CONFIG = {
   /** Geography scoring */
   geography: {
     primaryCountyPoints: 15, // in a target county
-    stateGAPoints: 5, // in Georgia but not target county
+    stateGAPoints: 5,        // in Georgia but not target county
   },
 
-  /** Segment scoring for leadScore */
+  /** Segment scoring for leadScore.
+   *  industrial is awarded whenever the industrial segment is present (pure or mixed).
+   *  mixed only applies to non-industrial multi-segment combos (e.g. commercial+residential). */
   segment: {
-    industrial: 20,
-    commercial: 15,
-    mixed: 12, // multiple segments
+    industrial: 20,   // awarded whenever industrial is present, regardless of other segments
+    commercial: 15,   // commercial-only
+    mixed: 10,        // non-industrial multi-segment — was 12
     residential: 5,
   },
 
@@ -31,22 +33,36 @@ export const SCORE_CONFIG = {
     hasStreetAddress: 2,
   },
 
-  /** High-value specialty keywords (switchgear, panelboards, etc.) */
+  /** Specialty keywords — scored per match, not as a flat bonus.
+   *  highValue: 6 pts each, capped at 15 (3 matches).
+   *  standard:  2 pts each, capped at 6  (3 matches). */
   specialties: {
-    highValue: ['switchgear', 'panelboards', 'controls', 'generators', 'ev charging'],
-    highValuePoints: 8,
+    highValue: [
+      'switchgear',
+      'panelboard',             // matches both "panelboard" and "panelboards"
+      'controls',
+      'generators',
+      'ev charging',
+      'industrial maintenance',  // moved from standard — high product-demand indicator
+    ],
+    highValuePointsEach: 6,   // per matched keyword (was flat 8 for any match)
+    highValueMax: 15,          // cap at 3 matches
     standard: [
       'lighting',
       'fire alarm',
       'low voltage',
-      'industrial maintenance',
       'distribution center',
       'warehouse',
+      'tenant improvement',
+      'service',               // added — common in AI output
     ],
-    standardPoints: 4,
+    standardPointsEach: 2,    // per matched keyword (was flat 4 for any match)
+    standardMax: 6,            // cap at 3 matches
   },
 
-  /** Signal recency and count for activeScore */
+  /** Signal scoring.
+   *  basePerSignal/maxSignalBonus/recency apply to activeScore.
+   *  leadScorePerSignal/leadScoreSignalMax give a small leadScore bonus for signal volume. */
   signals: {
     basePerSignal: 4,
     maxSignalBonus: 20,
@@ -55,13 +71,15 @@ export const SCORE_CONFIG = {
       within90Days: 7,
       within180Days: 3,
     },
+    leadScorePerSignal: 1,   // NEW: each signal adds 1 pt to leadScore
+    leadScoreSignalMax: 5,   // NEW: cap
   },
 
   /** Contact availability */
   contact: {
-    hasAnyContact: 8,
-    contactHasEmail: 4,
-    contactHasPhone: 4,
+    hasAnyContact: 5,        // was 8; reduced — email/phone on contact carry more weight
+    contactHasEmail: 5,      // was 4; increased — direct outreach path is high value
+    contactHasPhone: 3,      // was 4
   },
 
   /** Description language indicators */
@@ -73,10 +91,31 @@ export const SCORE_CONFIG = {
       'facility',
       'warehouse',
       'distribution',
+      'data center',        // added
+      'food processing',    // added
     ],
-    commercialTerms: ['commercial', 'retail', 'office', 'tenant improvement', 'build-out'],
-    industrialPoints: 6,
-    commercialPoints: 5,
+    commercialTerms: [
+      'commercial',
+      'retail',
+      'office',
+      'tenant improvement',
+      'build-out',
+      'renovation',         // added
+      'multifamily',        // added
+      'hospitality',        // added
+    ],
+    industrialPoints: 4,    // was 6
+    commercialPoints: 4,    // was 5
+  },
+
+  /** AI enrichment confidence bonus.
+   *  sourceConfidence is set by enrichWithAI() and reflects how clearly website content
+   *  described the company's segment and specialties. */
+  confidence: {
+    highThreshold: 0.75,   // >= 0.75 → rich, unambiguous AI classification
+    highPoints: 3,
+    mediumThreshold: 0.50,  // >= 0.50 → reasonable classification
+    mediumPoints: 1,
   },
 } as const
 
