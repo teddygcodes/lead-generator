@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
 import { CountyPanel } from './CountyPanel'
 
 interface CountyData {
@@ -43,6 +42,33 @@ function colorScale(count: number): string {
   return '#1e3a8a'
 }
 
+/** Load the Google Maps JS API by injecting a script tag (idempotent). */
+function loadGoogleMapsScript(apiKey: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Already loaded — resolve immediately
+    if (window.google?.maps?.Map) {
+      resolve()
+      return
+    }
+    // Script tag already injected (but not yet loaded) — wait for it
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src^="https://maps.googleapis.com/maps/api/js"]',
+    )
+    if (existing) {
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => reject(new Error('Google Maps script failed to load')))
+      return
+    }
+    // First time — inject the script
+    const script = document.createElement('script')
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=maps`
+    script.async = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Google Maps script failed to load — check API key and billing'))
+    document.head.appendChild(script)
+  })
+}
+
 export function TerritoryMap() {
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInitialized = useRef(false)
@@ -56,16 +82,12 @@ export function TerritoryMap() {
   const initMap = useCallback(
     async (data: Map<string, CountyData>) => {
       if (!mapRef.current || !apiKey || mapInitialized.current) return
-
-      // Mark as in-progress so concurrent calls are blocked.
-      // Reset to false in the catch block so a retry is possible.
       mapInitialized.current = true
 
       try {
-        setOptions({ key: apiKey, v: 'weekly' })
-        const { Map: GMap } = await importLibrary('maps') as google.maps.MapsLibrary
+        await loadGoogleMapsScript(apiKey)
 
-        const map = new GMap(mapRef.current, {
+        const map = new google.maps.Map(mapRef.current, {
           center: { lat: 32.75, lng: -83.5 },
           zoom: 7,
           scrollwheel: false,
@@ -115,7 +137,7 @@ export function TerritoryMap() {
           map.data.revertStyle()
         })
 
-        // Click → open county panel (fixed-position, outside map z-index stack)
+        // Click → open county panel
         map.data.addListener('click', (e: google.maps.Data.MouseEvent) => {
           const name = e.feature.getProperty('NAME') as string
           setSelectedCounty(name)
@@ -123,11 +145,11 @@ export function TerritoryMap() {
 
         setMapLoading(false)
       } catch (err) {
-        // Reset guard so callers can retry if needed
         mapInitialized.current = false
         const msg = err instanceof Error ? err.message : String(err)
         console.error('[TerritoryMap] initMap failed:', msg)
         setError(`Map failed to load: ${msg}`)
+        setMapLoading(false)
       }
     },
     [apiKey],
@@ -148,13 +170,12 @@ export function TerritoryMap() {
         for (const c of json.counties as CountyData[]) {
           m.set(c.county.toLowerCase(), c)
         }
-        // await so errors from initMap reach the .catch() below
         await initMap(m)
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
-        console.error('[TerritoryMap] data fetch failed:', msg)
-        setError(`Failed to load map data: ${msg}`)
+        console.error('[TerritoryMap] load failed:', msg)
+        setError(`Failed to load map: ${msg}`)
         setMapLoading(false)
       })
   }, [apiKey, initMap])
@@ -209,7 +230,6 @@ export function TerritoryMap() {
           </div>
         </div>
 
-        {/* Loading shimmer overlaid on the map div */}
         <div className="relative" style={{ height: 460 }}>
           {mapLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-50 z-10">
