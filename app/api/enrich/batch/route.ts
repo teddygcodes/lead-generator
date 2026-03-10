@@ -58,8 +58,14 @@ export async function POST(req: NextRequest) {
 
   const results = []
   for (const company of companies) {
-    const result = await runFullEnrichment(company.id)
-    results.push({ id: company.id, name: company.name, ...result })
+    try {
+      const result = await runFullEnrichment(company.id)
+      results.push({ id: company.id, name: company.name, ...result })
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      console.error(`[enrich/batch] company ${company.id} (${company.name}) threw:`, error)
+      results.push({ id: company.id, name: company.name, success: false, error })
+    }
   }
 
   const succeeded = results.filter((r) => r.success).length

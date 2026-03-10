@@ -18,6 +18,16 @@ export interface PipelineResult {
 }
 
 export async function runFullEnrichment(companyId: string): Promise<PipelineResult> {
+  try {
+    return await _runFullEnrichment(companyId)
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    console.error(`[pipeline] runFullEnrichment(${companyId}) uncaught:`, error)
+    return { success: false, error }
+  }
+}
+
+async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
   const company = await db.company.findUnique({
     where: { id: companyId },
     select: { id: true, name: true, website: true, notes: true, phone: true, city: true, state: true },
