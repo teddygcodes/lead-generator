@@ -45,6 +45,7 @@ function colorScale(count: number): string {
 
 export function TerritoryMap() {
   const mapRef = useRef<HTMLDivElement>(null)
+  const mapInitialized = useRef(false) // guard against re-init on re-renders
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +54,8 @@ export function TerritoryMap() {
 
   const initMap = useCallback(
     async (data: Map<string, CountyData>) => {
-      if (!mapRef.current || !apiKey) return
+      if (!mapRef.current || !apiKey || mapInitialized.current) return
+      mapInitialized.current = true
 
       setOptions({ key: apiKey, v: 'weekly' })
       const { Map: GMap } = await importLibrary('maps') as google.maps.MapsLibrary
@@ -66,12 +68,7 @@ export function TerritoryMap() {
         styles: MAP_STYLES,
       })
 
-      // Load committed GeoJSON from /public/data/
-      const res = await fetch('/data/georgia-counties.json')
-      const geoJson = await res.json() as object
-      map.data.addGeoJson(geoJson)
-
-      // Style each county
+      // Set style BEFORE adding GeoJSON so features get the function applied on load
       map.data.setStyle((feature) => {
         const name = feature.getProperty('NAME') as string
         const countyData = data.get(name.toLowerCase())
@@ -85,6 +82,11 @@ export function TerritoryMap() {
           cursor: 'pointer',
         }
       })
+
+      // Load committed GeoJSON from /public/data/
+      const res = await fetch('/data/georgia-counties.json')
+      const geoJson = await res.json() as object
+      map.data.addGeoJson(geoJson)
 
       // Hover tooltip
       map.data.addListener('mouseover', (e: google.maps.Data.MouseEvent) => {
@@ -107,7 +109,7 @@ export function TerritoryMap() {
         map.data.revertStyle()
       })
 
-      // Click → open county panel
+      // Click → open county panel (fixed-position, outside map z-index stack)
       map.data.addListener('click', (e: google.maps.Data.MouseEvent) => {
         const name = e.feature.getProperty('NAME') as string
         setSelectedCounty(name)
@@ -156,6 +158,7 @@ export function TerritoryMap() {
 
   return (
     <>
+      {/* Map card */}
       <div className="card overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
           <span className="text-xs font-medium text-gray-700">Georgia Territory Map</span>
@@ -178,14 +181,25 @@ export function TerritoryMap() {
             <span className="text-gray-300">uncontacted 60+</span>
           </div>
         </div>
-
-        <div className="relative" style={{ height: 460 }}>
-          <div ref={mapRef} className="h-full w-full" />
-          {selectedCounty && (
-            <CountyPanel county={selectedCounty} onClose={() => setSelectedCounty(null)} />
-          )}
-        </div>
+        <div ref={mapRef} style={{ height: 460 }} />
       </div>
+
+      {/* County panel — fixed position so it's outside the Maps z-index stack */}
+      {selectedCounty && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: 340,
+            zIndex: 1000,
+          }}
+          className="border-l border-gray-200 bg-white shadow-2xl"
+        >
+          <CountyPanel county={selectedCounty} onClose={() => setSelectedCounty(null)} />
+        </div>
+      )}
 
       {/* Hover tooltip — fixed position */}
       {tooltip && (
@@ -201,26 +215,13 @@ export function TerritoryMap() {
         >
           <p className="text-xs font-semibold text-gray-900 mb-1.5">{tooltip.data.county} County</p>
           <div className="space-y-0.5 text-[11px] text-gray-600">
-            <p>
-              Total companies:{' '}
-              <span className="font-medium text-gray-900">{tooltip.data.totalCompanies}</span>
-            </p>
-            <p>
-              Score 60+:{' '}
-              <span className="font-medium text-gray-900">{tooltip.data.highScoreCount}</span>
-            </p>
-            <p>
-              Uncontacted:{' '}
-              <span className="font-medium text-blue-700">{tooltip.data.uncontactedCount}</span>
-            </p>
-            <p>
-              Avg score:{' '}
-              <span className="font-medium text-gray-900">{tooltip.data.avgScore}</span>
-            </p>
+            <p>Total companies: <span className="font-medium text-gray-900">{tooltip.data.totalCompanies}</span></p>
+            <p>Score 60+: <span className="font-medium text-gray-900">{tooltip.data.highScoreCount}</span></p>
+            <p>Uncontacted: <span className="font-medium text-blue-700">{tooltip.data.uncontactedCount}</span></p>
+            <p>Avg score: <span className="font-medium text-gray-900">{tooltip.data.avgScore}</span></p>
             {tooltip.data.topLead && (
               <p className="pt-1 mt-1 border-t border-gray-100">
-                Top:{' '}
-                <span className="font-medium text-gray-900">{tooltip.data.topLead.name}</span>{' '}
+                Top: <span className="font-medium text-gray-900">{tooltip.data.topLead.name}</span>{' '}
                 <span className="text-green-700">({tooltip.data.topLead.score})</span>
               </p>
             )}
