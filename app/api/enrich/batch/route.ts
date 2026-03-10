@@ -11,9 +11,9 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const companies = await db.company.findMany({
-    where: { doNotContact: false, recordOrigin: { not: 'DEMO' } },
+    where: { doNotContact: false, recordOrigin: { not: 'DEMO' }, lastEnrichedAt: null },
     select: { id: true },
-    orderBy: { lastEnrichedAt: 'asc' },
+    orderBy: { createdAt: 'asc' },
     take: 500, // safety cap — prevents absurdly large payloads
   })
 
