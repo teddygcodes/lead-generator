@@ -51,6 +51,7 @@ enum RecordOrigin {
   DISCOVERED
   IMPORTED
   MANUAL
+  PERMIT_DISCOVERY
 }
 
 model Company {
@@ -83,12 +84,18 @@ model Company {
   notes                String?
   lastSeenAt           DateTime?
   lastEnrichedAt       DateTime?
+  lastContactedAt      DateTime?
+  lastPermitAt         DateTime?
+  permitCount30Days    Int           @default(0)
+  activeJobCount       Int           @default(0)
+  permitSignalScore    Int           @default(0)
   recordOrigin         RecordOrigin  @default(DEMO)
 
   signals   Signal[]
   contacts  Contact[]
   userNotes UserNote[]
   tags      CompanyTag[]
+  permits   Permit[]
 
   @@index([normalizedName])
   @@index([county])
@@ -193,4 +200,40 @@ model CompanyTag {
   tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([companyId, tagId])
+}
+
+model Permit {
+  id                    String    @id @default(cuid())
+  source                String    // "ACCELA_GWINNETT" | "ACCELA_COBB" | "ACCELA_HALLCO" | "ACCELA_ATLANTA" | "ENERGOV_FORSYTH" | "ENERGOV_JACKSON"
+  externalId            String
+  permitNumber          String
+  permitType            String    // "ELECTRICAL" | "BUILDING" | "MECHANICAL" | "OTHER"
+  description           String?
+  status                String    // "APPLIED" | "ISSUED" | "INSPECTED" | "CLOSED"
+  jobAddress            String?
+  county                String
+  jobValue              Float?
+  isResidential         Boolean   @default(false)
+  estimatedValueBucket  String?   // "UNDER_20K" | "20K_TO_100K" | "100K_TO_500K" | "500K_PLUS" | "UNKNOWN"
+  valueIsEstimated      Boolean   @default(false)
+  valueEstimatedAt      DateTime?
+  filedAt               DateTime
+  issuedAt              DateTime?
+  inspectionAt          DateTime?
+  closedAt              DateTime?
+  contractorName        String
+  contractorPhone       String?
+  contractorLicense     String?
+  companyId             String?
+  company               Company?  @relation(fields: [companyId], references: [id])
+  matchConfidence       Float?
+  matchedAt             DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([source, externalId])
+  @@index([county])
+  @@index([companyId])
+  @@index([filedAt])
+  @@index([status])
 }
