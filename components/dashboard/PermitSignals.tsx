@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Zap, RefreshCw } from 'lucide-react'
 
@@ -121,10 +121,10 @@ function StatusPill({ status }: { status: string }) {
       </span>
     )
   }
-  if (normalized === 'INSPECTED' || normalized === 'INSPECTION SCHEDULED') {
+  if (normalized === 'INSPECTED') {
     return (
       <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 leading-4">
-        Inspection Scheduled
+        Inspected
       </span>
     )
   }
@@ -147,7 +147,7 @@ export function PermitSignals() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [valueFilter, setValueFilter] = useState<ValueFilter>(20000)
 
-  async function fetchSignals() {
+  const fetchSignals = useCallback(async () => {
     try {
       const res = await fetch('/api/permits/signals')
       if (!res.ok) throw new Error(`Signals fetch failed: ${res.status}`)
@@ -158,11 +158,11 @@ export function PermitSignals() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load signals')
     }
-  }
+  }, [])
 
   useEffect(() => {
     fetchSignals().finally(() => setLoading(false))
-  }, [])
+  }, [fetchSignals])
 
   async function syncNow() {
     setSyncing(true)
@@ -299,7 +299,7 @@ export function PermitSignals() {
                 {/* Row 2: value + type + county + age */}
                 <p className="text-[11px] text-gray-500 mb-1.5">
                   {isEstimated ? (
-                    <em className="not-italic text-gray-400">{valueDisplay}</em>
+                    <em className="text-gray-400">{valueDisplay}</em>
                   ) : (
                     <span className={permit.jobValue === null ? 'text-gray-400' : undefined}>
                       {valueDisplay}
