@@ -11,63 +11,82 @@ dotenv.config({ path: '.env.local' })
 
 const APP_ID = process.env.ACCELA_APP_ID
 const APP_SECRET = process.env.ACCELA_APP_SECRET
-const AGENCY = 'ATLANTA_GA'
+// Override with CLI arg: pnpm tsx scripts/test-accela.ts GWINNETT_COUNTY
+const AGENCY_ARG = process.argv[2] ?? 'GWINNETT_COUNTY'
 const AUTH_URL = 'https://auth.accela.com/oauth2/token'
 const API_BASE = 'https://apis.accela.com'
 
 async function main() {
-  console.log('\n=== STEP 1: Get auth token for', AGENCY, '===\n')
+  console.log('\n=== STEP 1: Try auth for multiple Gwinnett + Hall agency name variations ===\n')
 
   if (!APP_ID || !APP_SECRET) {
     console.error('ACCELA_APP_ID or ACCELA_APP_SECRET not set in .env.local — stopping.')
     process.exit(1)
   }
 
-  // ---- Step 1: Token — try multiple param variations -------------------------
-  // Variations differ in how environment + scope are passed, and in agency_name format.
-  // Try each in order; stop at first success.
+  // ---- Step 1: Token — try multiple agency names ----------------------------
+  // Now testing Gwinnett, Hall, and Cobb (Atlanta had no ACA portal → skipping).
+  // The agency_name must match how the agency is registered in Accela's auth server.
   type TokenAttempt = { label: string; agency: string; body: Record<string, string>; headers: Record<string, string> }
   const TOKEN_ATTEMPTS: TokenAttempt[] = [
+    // --- Gwinnett ---
     {
-      label: 'Variation 1: environment+scope in body, agency_name=ATLANTA_GA',
+      label: 'Gwinnett: agency_name=GWINNETT_COUNTY',
+      agency: 'GWINNETT_COUNTY',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'GWINNETT_COUNTY', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    {
+      label: 'Gwinnett: agency_name=GWINNETT',
+      agency: 'GWINNETT',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'GWINNETT', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    {
+      label: 'Gwinnett: agency_name=GwinnettCounty',
+      agency: 'GwinnettCounty',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'GwinnettCounty', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    // --- Hall County ---
+    {
+      label: 'Hall: agency_name=HALL_COUNTY',
+      agency: 'HALL_COUNTY',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'HALL_COUNTY', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    {
+      label: 'Hall: agency_name=HALLCO',
+      agency: 'HALLCO',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'HALLCO', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    // --- Cobb County ---
+    {
+      label: 'Cobb: agency_name=COBB_COUNTY',
+      agency: 'COBB_COUNTY',
+      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
+               agency_name: 'COBB_COUNTY', environment: 'PROD', scope: 'records' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    },
+    // --- Atlanta (previous failures kept for reference) ---
+    {
+      label: 'Atlanta: agency_name=ATLANTA_GA',
       agency: 'ATLANTA_GA',
       body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
                agency_name: 'ATLANTA_GA', environment: 'PROD', scope: 'records' },
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     },
-    {
-      label: 'Variation 2: environment as header, scope dropped, agency_name=ATLANTA_GA',
-      agency: 'ATLANTA_GA',
-      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
-               agency_name: 'ATLANTA_GA' },
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-accela-environment': 'PROD' },
-    },
-    {
-      label: 'Variation 3: no scope, environment as header, agency_name=ATLANTA_GA',
-      agency: 'ATLANTA_GA',
-      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
-               agency_name: 'ATLANTA_GA', environment: 'PROD' },
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-accela-environment': 'PROD' },
-    },
-    {
-      label: 'Variation 4: agency_name=atlanta (lowercase)',
-      agency: 'atlanta',
-      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
-               agency_name: 'atlanta', environment: 'PROD' },
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-accela-environment': 'PROD' },
-    },
-    {
-      label: 'Variation 5: agency_name=CITY_OF_ATLANTA',
-      agency: 'CITY_OF_ATLANTA',
-      body: { grant_type: 'client_credentials', client_id: APP_ID, client_secret: APP_SECRET,
-               agency_name: 'CITY_OF_ATLANTA', environment: 'PROD' },
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-accela-environment': 'PROD' },
-    },
   ]
 
   let token = ''
   let tokenOk = false
-  let workingAgency = AGENCY
+  let workingAgency = AGENCY_ARG
 
   for (const attempt of TOKEN_ATTEMPTS) {
     console.log(`Trying: ${attempt.label}`)
@@ -98,7 +117,7 @@ async function main() {
   }
 
   console.log(`\nWorking agency_name: "${workingAgency}"`)
-  console.log(`Using for record fetch: AGENCY constant was "${AGENCY}"`)
+  console.log(`Using for record fetch: CLI arg was "${AGENCY_ARG}"`)
 
 
   // ---- Step 2: Fetch records ------------------------------------------------

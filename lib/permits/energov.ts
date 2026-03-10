@@ -319,7 +319,7 @@ async function energovAdapter(instance: InstanceName): Promise<NormalizedPermit[
         jobAddress,
         county: config.county,
         jobValue,
-        isResidential: isResidential(description) || isResidential(result.CaseType),
+        isResidential: isResidential(description) || isResidential(result.CaseType ?? null),
         filedAt,
         issuedAt,
         inspectionAt: null,

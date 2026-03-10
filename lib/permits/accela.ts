@@ -1,14 +1,26 @@
 /**
- * Accela API adapter — fetches permit records from Accela-powered county/city portals.
+ * Accela REST API adapter — fetches permit records from Accela agencies via apis.accela.com.
  *
- * Supported agencies: Gwinnett County, Cobb County, Hall County, Atlanta (Fulton)
+ * Supported agencies: Gwinnett County, Hall County, Atlanta (Fulton)
+ * NOTE: Cobb County does not appear to be registered on the Accela developer platform
+ *       (auth server returns 500 for all known agency name variations).
  *
- * Auth: OAuth2 client_credentials flow per agency.
+ * Auth: OAuth2 client_credentials via https://auth.accela.com/oauth2/token
  * Tokens are cached module-level until 60 seconds before expiry.
  *
- * IMPORTANT: Raw API response logging is enabled for the first successful fetch
- * per adapter invocation to confirm actual field names before mapping is finalized.
- * Remove the raw log block once field mapping is verified.
+ * IMPORTANT — Agency authorization required:
+ *   The Accela developer API requires two levels of access:
+ *   1. A registered developer app (ACCELA_APP_ID / ACCELA_APP_SECRET) — we have this.
+ *   2. Each county must grant that app access in their Accela admin portal — NOT YET DONE.
+ *
+ *   Auth server agency name verification (via test as of 2026-03-10):
+ *     'GWINNETT'    → data_validation_error (agency recognized, app not yet authorized)
+ *     'HALLCO'      → data_validation_error (agency recognized, app not yet authorized)
+ *     'ATLANTA_GA'  → data_validation_error (agency recognized, app not yet authorized)
+ *     'COBB_COUNTY' → 500 invalid_request   (agency NOT found in Accela developer system)
+ *
+ *   Until authorization is granted by each county, this adapter will return [] silently.
+ *   Raw record logging is included for first-record field mapping once auth works.
  */
 
 import { type NormalizedPermit, isResidential, normalizeStatus } from '@/lib/permits/base'
@@ -21,10 +33,12 @@ const ACCELA_APP_ID = process.env.ACCELA_APP_ID ?? ''
 const ACCELA_APP_SECRET = process.env.ACCELA_APP_SECRET ?? ''
 
 const AGENCY_CONFIG = {
-  GWINNETT_COUNTY: { source: 'ACCELA_GWINNETT', county: 'Gwinnett' },
-  COBB_COUNTY:     { source: 'ACCELA_COBB',     county: 'Cobb' },
-  HALL_COUNTY:     { source: 'ACCELA_HALLCO',   county: 'Hall' },
-  ATLANTA_GA:      { source: 'ACCELA_ATLANTA',  county: 'Fulton' },
+  // authAgencyName: exact agency_name as registered on auth.accela.com
+  // (differs from the ACA citizen portal URL code)
+  GWINNETT_COUNTY: { authAgencyName: 'GWINNETT',   source: 'ACCELA_GWINNETT', county: 'Gwinnett' },
+  HALL_COUNTY:     { authAgencyName: 'HALLCO',      source: 'ACCELA_HALLCO',   county: 'Hall' },
+  ATLANTA_GA:      { authAgencyName: 'ATLANTA_GA',  source: 'ACCELA_ATLANTA',  county: 'Fulton' },
+  // Cobb County excluded: not found in Accela developer system (500 for all name variations)
 } as const
 
 type AgencyName = keyof typeof AGENCY_CONFIG
@@ -287,9 +301,9 @@ async function accelaAdapter(agencyName: AgencyName): Promise<NormalizedPermit[]
   let token: string
 
   try {
-    token = await getAccelaToken(agencyName)
+    token = await getAccelaToken(config.authAgencyName)
   } catch (err) {
-    console.warn(`[accela] Could not obtain token for ${agencyName}:`, err)
+    console.warn(`[accela] Could not obtain token for ${agencyName} (authAgencyName=${config.authAgencyName}):`, err)
     return []
   }
 

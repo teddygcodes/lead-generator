@@ -34,7 +34,6 @@ export interface SyncSummary {
 
 const SOURCE_NAMES = [
   'ACCELA_GWINNETT',
-  'ACCELA_COBB',
   'ACCELA_HALLCO',
   'ACCELA_ATLANTA',
   'ENERGOV_FORSYTH',
@@ -164,7 +163,6 @@ export async function syncPermits(): Promise<SyncSummary> {
 
   const results = await Promise.allSettled([
     accelaAdapter('GWINNETT_COUNTY'),
-    accelaAdapter('COBB_COUNTY'),
     accelaAdapter('HALL_COUNTY'),
     accelaAdapter('ATLANTA_GA'),
     energovAdapter('FORSYTH'),
