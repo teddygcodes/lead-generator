@@ -7,6 +7,7 @@
  */
 
 import { accelaAdapter } from '@/lib/permits/accela'
+import { accelaAcaAdapter } from '@/lib/permits/accela-aca'
 import { energovAdapter } from '@/lib/permits/energov'
 import type { NormalizedPermit } from '@/lib/permits/base'
 import { scoreCompany } from '@/lib/scoring'
@@ -33,9 +34,12 @@ export interface SyncSummary {
 // ---------------------------------------------------------------------------
 
 const SOURCE_NAMES = [
-  'ACCELA_GWINNETT',
+  'ACCELA_GWINNETT',   // REST API (inactive — returns [] until county authorizes our app)
   'ACCELA_HALLCO',
   'ACCELA_ATLANTA',
+  'ACA_ATLANTA',       // HTML scraper via ACA citizen portal (active)
+  'ACA_GWINNETT',
+  'ACA_HALLCO',
   'ENERGOV_FORSYTH',
   'ENERGOV_JACKSON',
 ] as const
@@ -162,9 +166,12 @@ export async function syncPermits(): Promise<SyncSummary> {
   console.log('[sync-permits] Starting parallel fetch from all sources…')
 
   const results = await Promise.allSettled([
-    accelaAdapter('GWINNETT_COUNTY'),
+    accelaAdapter('GWINNETT_COUNTY'),     // REST API (inactive)
     accelaAdapter('HALL_COUNTY'),
     accelaAdapter('ATLANTA_GA'),
+    accelaAcaAdapter('ATLANTA_GA'),       // HTML scraper
+    accelaAcaAdapter('GWINNETT'),
+    accelaAcaAdapter('HALLCO'),
     energovAdapter('FORSYTH'),
     energovAdapter('JACKSON'),
   ])
@@ -190,6 +197,31 @@ export async function syncPermits(): Promise<SyncSummary> {
   }
 
   console.log(`[sync-permits] Total permits fetched: ${allPermits.length}`)
+
+  // -------------------------------------------------------------------------
+  // STEP 1b — Cross-source deduplication by permitNumber
+  //
+  // Both the REST API adapter (accela.ts) and the ACA scraper (accela-aca.ts)
+  // may eventually return data for the same permits. Deduplicate by permitNumber
+  // before upserting so we never create two DB rows for the same physical permit.
+  // Keep the first occurrence (earlier sources in SOURCE_NAMES order win).
+  // -------------------------------------------------------------------------
+
+  const seenPermitNumbers = new Set<string>()
+  const deduplicatedPermits: NormalizedPermit[] = []
+  for (const permit of allPermits) {
+    if (!seenPermitNumbers.has(permit.permitNumber)) {
+      seenPermitNumbers.add(permit.permitNumber)
+      deduplicatedPermits.push(permit)
+    }
+  }
+  if (deduplicatedPermits.length < allPermits.length) {
+    console.log(
+      `[sync-permits] Cross-source dedup: removed ${allPermits.length - deduplicatedPermits.length} duplicate permit numbers`,
+    )
+  }
+  // Replace allPermits with the deduplicated set for all downstream steps
+  allPermits.splice(0, allPermits.length, ...deduplicatedPermits)
 
   // -------------------------------------------------------------------------
   // STEP 2 — Bulk upsert permits; identify new vs updated
