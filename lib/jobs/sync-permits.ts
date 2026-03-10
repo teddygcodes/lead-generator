@@ -8,7 +8,6 @@
 
 import { accelaAdapter } from '@/lib/permits/accela'
 import { accelaAcaAdapter } from '@/lib/permits/accela-aca'
-import { energovAdapter } from '@/lib/permits/energov'
 import type { NormalizedPermit } from '@/lib/permits/base'
 import { scoreCompany } from '@/lib/scoring'
 import { normalizeName } from '@/lib/normalization'
@@ -40,8 +39,9 @@ const SOURCE_NAMES = [
   'ACA_ATLANTA',       // HTML scraper via ACA citizen portal (active)
   'ACA_GWINNETT',
   'ACA_HALLCO',
-  'ENERGOV_FORSYTH',
-  'ENERGOV_JACKSON',
+  // EnerGov (Forsyth, Jackson) removed — API returns no contractor name so permits
+  // can never be matched to companies or affect scoring. Re-add if contractor detail
+  // endpoint becomes available.
 ] as const
 
 // ---------------------------------------------------------------------------
@@ -145,10 +145,15 @@ function computePermitSignalScore(
     score = 3
   }
 
-  // Bonus for high recent activity
-  if (permitCount30Days >= 3) score += 5
+  // Volume bonus — tiered by permit count in last 30 days.
+  // Primary signal for ACA permits (no job value). Rewards busy contractors.
+  if (permitCount30Days >= 15)     score += 17
+  else if (permitCount30Days >= 10) score += 12
+  else if (permitCount30Days >= 6)  score += 8
+  else if (permitCount30Days >= 3)  score += 5
+  else if (permitCount30Days >= 1)  score += 2
 
-  // Fix 5: cap at 30 within the function rather than relying on caller
+  // Cap at 30 before scoreCompany() applies its own maxScore cap
   return Math.min(score, 30)
 }
 
@@ -160,20 +165,18 @@ export async function syncPermits(): Promise<SyncSummary> {
   const errors: string[] = []
 
   // -------------------------------------------------------------------------
-  // STEP 1 — Parallel fetch from all 6 sources
+  // STEP 1 — Parallel fetch from all active sources
   // -------------------------------------------------------------------------
 
   console.log('[sync-permits] Starting parallel fetch from all sources…')
 
   const results = await Promise.allSettled([
-    accelaAdapter('GWINNETT_COUNTY'),     // REST API (inactive)
+    accelaAdapter('GWINNETT_COUNTY'),     // REST API (inactive — returns [])
     accelaAdapter('HALL_COUNTY'),
     accelaAdapter('ATLANTA_GA'),
-    accelaAcaAdapter('ATLANTA_GA'),       // HTML scraper
+    accelaAcaAdapter('ATLANTA_GA'),       // HTML scraper (active)
     accelaAcaAdapter('GWINNETT'),
     accelaAcaAdapter('HALLCO'),
-    energovAdapter('FORSYTH'),
-    energovAdapter('JACKSON'),
   ])
 
   const sourceSummaries: SyncSummary['sources'] = []

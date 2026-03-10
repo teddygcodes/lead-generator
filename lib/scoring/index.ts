@@ -12,6 +12,7 @@ export interface ScoringInput {
   street?: string | null
   sourceConfidence?: number | null // AI enrichment confidence (0-1), stored on Company.sourceConfidence
   permitSignalScore?: number | null // Pre-computed permit activity score, stored on Company.permitSignalScore
+  permitCount30Days?: number | null // Number of permits filed in the last 30 days, for richer reason string
   signals?: Array<{
     signalDate?: Date | null
     signalType?: string
@@ -225,7 +226,8 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
   if (input.permitSignalScore && input.permitSignalScore > 0) {
     const pts = cap(input.permitSignalScore, SCORE_CONFIG.permit.maxScore)
     lead += pts
-    reasons.push(`Permit signal score: ${pts} pts from active permit activity`)
+    const countNote = input.permitCount30Days ? ` (${input.permitCount30Days} permits in 30 days)` : ''
+    reasons.push(`Active permit activity${countNote} → +${pts} pts`)
   }
 
   const finalLead = cap(lead, SCORE_CONFIG.maxScore)

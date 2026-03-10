@@ -844,10 +844,10 @@ async function fetchAllPagesForType(
 // Main adapter
 // ---------------------------------------------------------------------------
 
-export async function accelaAcaAdapter(agencyCode: AcaAgencyCode): Promise<NormalizedPermit[]> {
+export async function accelaAcaAdapter(agencyCode: AcaAgencyCode, daysBack = 30): Promise<NormalizedPermit[]> {
   const config    = ACA_AGENCY_CONFIG[agencyCode]
   const endDate   = toMDY(new Date())
-  const startDate = toMDY(new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000))
+  const startDate = toMDY(new Date(Date.now() - daysBack * 24 * 60 * 60 * 1_000))
 
   console.log(`[accela-aca] ${agencyCode}: starting scrape (${startDate} → ${endDate})`)
 

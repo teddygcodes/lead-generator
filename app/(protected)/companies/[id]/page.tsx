@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { scoreCompany } from '@/lib/scoring'
 import { StatusBadge, Badge } from '@/components/ui/Badge'
 import { formatDate, formatPhone } from '@/lib/format'
-import { Globe, Phone, Mail, MapPin, Calendar, Radio, Users, Tag } from 'lucide-react'
+import { Globe, Phone, Mail, MapPin, Calendar, Radio, Users, Tag, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { EnrichButton } from '@/components/companies/EnrichButton'
 
@@ -21,6 +21,7 @@ export default async function CompanyDetailPage({ params }: Params) {
       contacts: { orderBy: { confidenceScore: 'desc' }, take: 50 },
       userNotes: { orderBy: { createdAt: 'desc' }, take: 5 },
       tags: { include: { tag: true } },
+      permits: { orderBy: { filedAt: 'desc' }, take: 50 },
     },
   })
 
@@ -36,6 +37,9 @@ export default async function CompanyDetailPage({ params }: Params) {
     email: company.email,
     phone: company.phone,
     street: company.street,
+    sourceConfidence: company.sourceConfidence,
+    permitSignalScore: company.permitSignalScore,
+    permitCount30Days: company.permitCount30Days,
     signals: company.signals,
     contacts: company.contacts,
   })
@@ -316,6 +320,61 @@ export default async function CompanyDetailPage({ params }: Params) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Permits */}
+      <div className="card">
+        <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2.5">
+          <FileText size={13} className="text-gray-400" />
+          <span className="text-xs font-medium text-gray-700">Permits ({company.permits.length})</span>
+        </div>
+        {company.permits.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-gray-400 text-center">No permits on file</div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {company.permits.map((permit) => {
+              const statusColor =
+                { ISSUED: 'bg-green-100 text-green-700', INSPECTED: 'bg-blue-100 text-blue-700' }[
+                  permit.status.toUpperCase()
+                ] ?? 'bg-gray-100 text-gray-500'
+              const detailParts = [
+                permit.jobAddress,
+                permit.description,
+                permit.county,
+              ].filter(Boolean)
+              return (
+                <div key={permit.id} className="px-4 py-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-medium text-gray-800">{permit.permitNumber}</span>
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 leading-4">
+                          {permit.permitType}
+                        </span>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-4 ${statusColor}`}>
+                          {permit.status}
+                        </span>
+                        {permit.isResidential && (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600 leading-4">
+                            Residential
+                          </span>
+                        )}
+                      </div>
+                      {detailParts.length > 0 && (
+                        <p className="mt-0.5 text-xs text-gray-500 line-clamp-1">
+                          {detailParts.join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                    <span className="flex-none text-xs text-gray-400">
+                      {formatDate(permit.filedAt)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
