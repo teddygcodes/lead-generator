@@ -108,6 +108,12 @@ export const SCORE_CONFIG = {
     commercialPoints: 4,    // was 5
   },
 
+  /** Permit signal score — pre-computed by the permit adapter (Task 1).
+   *  Capped at 25 pts contribution to leadScore. */
+  permit: {
+    maxScore: 25,
+  },
+
   /** AI enrichment confidence bonus.
    *  sourceConfidence is set by enrichWithAI() and reflects how clearly website content
    *  described the company's segment and specialties. */

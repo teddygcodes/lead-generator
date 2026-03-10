@@ -29,6 +29,7 @@ export async function POST() {
       phone: true,
       street: true,
       sourceConfidence: true,
+      permitSignalScore: true,
       signals: { select: { signalDate: true, signalType: true } },
       contacts: { select: { email: true, phone: true } },
     },
@@ -46,6 +47,7 @@ export async function POST() {
       phone: company.phone,
       street: company.street,
       sourceConfidence: company.sourceConfidence,
+      permitSignalScore: company.permitSignalScore ?? 0,
       signals: company.signals,
       contacts: company.contacts,
     })
