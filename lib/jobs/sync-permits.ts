@@ -145,7 +145,8 @@ function computePermitSignalScore(
   // Bonus for high recent activity
   if (permitCount30Days >= 3) score += 5
 
-  return score
+  // Fix 5: cap at 30 within the function rather than relying on caller
+  return Math.min(score, 30)
 }
 
 // ---------------------------------------------------------------------------
@@ -193,49 +194,63 @@ export async function syncPermits(): Promise<SyncSummary> {
   console.log(`[sync-permits] Total permits fetched: ${allPermits.length}`)
 
   // -------------------------------------------------------------------------
-  // STEP 2 — Upsert each permit; identify new vs updated
+  // STEP 2 — Bulk upsert permits; identify new vs updated
+  //
+  // Fix 2: replace the N+1 findUnique+upsert loop with a single bulk lookup,
+  // then createMany for new records and individual updates for existing ones.
   // -------------------------------------------------------------------------
 
   let newPermits = 0
   let updatedPermits = 0
 
-  // Permits that are brand-new (need matching in step 3)
-  const newPermitRecords: Array<{ dbId: string; permit: NormalizedPermit }> = []
+  // Bulk fetch all (source, externalId) pairs that already exist in the DB
+  const existingPermitRows = await db.permit.findMany({
+    where: {
+      OR: allPermits.map((p) => ({ source: p.source, externalId: p.externalId })),
+    },
+    select: { source: true, externalId: true, id: true },
+  })
+  const existingSet = new Set(existingPermitRows.map((p) => `${p.source}:${p.externalId}`))
 
-  for (const permit of allPermits) {
+  // Split into creates vs updates
+  const toCreate = allPermits.filter((p) => !existingSet.has(`${p.source}:${p.externalId}`))
+  const toUpdate = allPermits.filter((p) => existingSet.has(`${p.source}:${p.externalId}`))
+
+  // Bulk-insert new permits
+  if (toCreate.length > 0) {
+    await db.permit.createMany({
+      data: toCreate.map((p) => ({
+        source: p.source,
+        externalId: p.externalId,
+        permitNumber: p.permitNumber,
+        permitType: p.permitType,
+        description: p.description,
+        status: p.status,
+        jobAddress: p.jobAddress,
+        county: p.county,
+        jobValue: p.jobValue,
+        isResidential: p.isResidential,
+        filedAt: p.filedAt,
+        issuedAt: p.issuedAt,
+        inspectionAt: p.inspectionAt,
+        closedAt: p.closedAt,
+        contractorName: p.contractorName,
+        contractorPhone: p.contractorPhone,
+        contractorLicense: p.contractorLicense,
+      })),
+      skipDuplicates: true,
+    })
+    newPermits += toCreate.length
+  }
+
+  // Update the 6 mutable fields on existing permits
+  for (const permit of toUpdate) {
     try {
-      // Check existence first so we can track new vs updated
-      const existing = await db.permit.findUnique({
+      await db.permit.update({
         where: {
           source_externalId: { source: permit.source, externalId: permit.externalId },
         },
-        select: { id: true },
-      })
-
-      const upserted = await db.permit.upsert({
-        where: {
-          source_externalId: { source: permit.source, externalId: permit.externalId },
-        },
-        create: {
-          source: permit.source,
-          externalId: permit.externalId,
-          permitNumber: permit.permitNumber,
-          permitType: permit.permitType,
-          description: permit.description,
-          status: permit.status,
-          jobAddress: permit.jobAddress,
-          county: permit.county,
-          jobValue: permit.jobValue,
-          isResidential: permit.isResidential,
-          filedAt: permit.filedAt,
-          issuedAt: permit.issuedAt,
-          inspectionAt: permit.inspectionAt,
-          closedAt: permit.closedAt,
-          contractorName: permit.contractorName,
-          contractorPhone: permit.contractorPhone,
-          contractorLicense: permit.contractorLicense,
-        },
-        update: {
+        data: {
           status: permit.status,
           issuedAt: permit.issuedAt,
           inspectionAt: permit.inspectionAt,
@@ -244,17 +259,37 @@ export async function syncPermits(): Promise<SyncSummary> {
           contractorPhone: permit.contractorPhone,
         },
       })
-
-      if (!existing) {
-        newPermits++
-        newPermitRecords.push({ dbId: upserted.id, permit })
-      } else {
-        updatedPermits++
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      errors.push(`Upsert failed for ${permit.source}/${permit.externalId}: ${message}`)
+      errors.push(`Update failed for ${permit.source}/${permit.externalId}: ${message}`)
     }
+  }
+  updatedPermits += toUpdate.length
+
+  // Re-query the newly created permits to obtain their DB ids for matching
+  let newPermitRecords: Array<{
+    id: string
+    source: string
+    externalId: string
+    contractorName: string | null
+    contractorPhone: string | null
+    county: string | null
+  }> = []
+
+  if (toCreate.length > 0) {
+    newPermitRecords = await db.permit.findMany({
+      where: {
+        OR: toCreate.map((p) => ({ source: p.source, externalId: p.externalId })),
+      },
+      select: {
+        id: true,
+        source: true,
+        externalId: true,
+        contractorName: true,
+        contractorPhone: true,
+        county: true,
+      },
+    })
   }
 
   console.log(`[sync-permits] Upserted — new: ${newPermits}, updated: ${updatedPermits}`)
@@ -276,53 +311,64 @@ export async function syncPermits(): Promise<SyncSummary> {
       select: { id: true, name: true, normalizedName: true },
     })
 
+    // Fix 4: pre-compute normalizedName for every company before the inner loop
+    const normalizedCompanies = companies.map((c) => ({
+      id: c.id,
+      name: c.name,
+      normalizedName: normalizeForMatch(c.name),
+    }))
+
     console.log(`[sync-permits] Matching ${newPermitRecords.length} new permits against ${companies.length} companies…`)
 
-    for (const { dbId, permit } of newPermitRecords) {
-      if (!permit.contractorName) continue
+    for (const record of newPermitRecords) {
+      if (!record.contractorName) continue
 
-      const normalizedContractor = normalizeForMatch(permit.contractorName)
+      const normalizedContractor = normalizeForMatch(record.contractorName)
 
-      // Find best match
+      // Find best match — iterate pre-computed normalizedCompanies (Fix 4)
       let bestScore = 0
       let bestCompanyId: string | null = null
 
-      for (const company of companies) {
-        const normalizedCompany = normalizeForMatch(company.name)
-        const score = matchScore(normalizedContractor, normalizedCompany)
+      for (const nc of normalizedCompanies) {
+        const score = matchScore(normalizedContractor, nc.normalizedName)
         if (score > bestScore) {
           bestScore = score
-          bestCompanyId = company.id
+          bestCompanyId = nc.id
         }
       }
 
       if (bestScore >= 0.75 && bestCompanyId !== null) {
-        // Matched to existing company
-        await db.permit.update({
-          where: { id: dbId },
-          data: {
-            companyId: bestCompanyId,
-            matchConfidence: bestScore,
-            matchedAt: new Date(),
-          },
-        })
-        affectedCompanyIds.add(bestCompanyId)
-        companiesMatched++
+        // Fix 1: wrap the permit.update for matched company in a per-permit try/catch
+        try {
+          await db.permit.update({
+            where: { id: record.id },
+            data: {
+              companyId: bestCompanyId,
+              matchConfidence: bestScore,
+              matchedAt: new Date(),
+            },
+          })
+          affectedCompanyIds.add(bestCompanyId)
+          companiesMatched++
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          errors.push(`Permit match update failed for permit id=${record.id}: ${message}`)
+        }
       } else {
         // No match — conditionally create a new company
         const hasQualifyingKeyword = QUALIFYING_KEYWORDS.some((kw) =>
-          permit.contractorName.toLowerCase().includes(kw.toLowerCase()),
+          record.contractorName!.toLowerCase().includes(kw.toLowerCase()),
         )
 
         if (hasQualifyingKeyword) {
           try {
             const newCompany = await db.company.create({
               data: {
-                name: permit.contractorName,
-                normalizedName: normalizeName(permit.contractorName),
-                county: permit.county,
+                name: record.contractorName!,
+                normalizedName: normalizeName(record.contractorName),
+                county: record.county,
                 state: 'GA',
-                phone: permit.contractorPhone ?? undefined,
+                phone: record.contractorPhone ?? undefined,
                 recordOrigin: 'PERMIT_DISCOVERY',
                 leadScore: 20,
                 status: 'NEW',
@@ -331,7 +377,7 @@ export async function syncPermits(): Promise<SyncSummary> {
             })
 
             await db.permit.update({
-              where: { id: dbId },
+              where: { id: record.id },
               data: {
                 companyId: newCompany.id,
                 matchConfidence: 1.0,
@@ -340,10 +386,10 @@ export async function syncPermits(): Promise<SyncSummary> {
             })
 
             // Add to in-memory list so subsequent permits in this batch can match it
-            companies.push({
+            normalizedCompanies.push({
               id: newCompany.id,
               name: newCompany.name,
-              normalizedName: newCompany.normalizedName,
+              normalizedName: normalizeForMatch(newCompany.name),
             })
 
             affectedCompanyIds.add(newCompany.id)
@@ -351,7 +397,7 @@ export async function syncPermits(): Promise<SyncSummary> {
             enrichmentQueued++
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
-            errors.push(`Company create failed for "${permit.contractorName}": ${message}`)
+            errors.push(`Company create failed for "${record.contractorName}": ${message}`)
           }
         }
       }
@@ -364,6 +410,9 @@ export async function syncPermits(): Promise<SyncSummary> {
 
   // -------------------------------------------------------------------------
   // STEP 4 — Update denormalized Company permit fields and rescore
+  //
+  // Fix 3: compute permitSignalScore locally, then call scoreCompany() once,
+  // then write all fields in a single db.company.update (was two writes).
   // -------------------------------------------------------------------------
 
   const affectedIds = [...affectedCompanyIds]
@@ -374,6 +423,7 @@ export async function syncPermits(): Promise<SyncSummary> {
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
+      // Query 1 of 3: get all permits for this company (needed for scoring)
       const permits = await db.permit.findMany({
         where: { companyId },
         select: {
@@ -395,41 +445,46 @@ export async function syncPermits(): Promise<SyncSummary> {
         ['ISSUED', 'INSPECTED'].includes(p.status),
       ).length
 
+      // Compute permitSignalScore locally — do NOT write it yet
       const permitSignalScore = computePermitSignalScore(permits, permitCount30Days, activeJobCount)
 
-      await db.company.update({
-        where: { id: companyId },
-        data: { lastPermitAt, permitCount30Days, activeJobCount, permitSignalScore },
-      })
-
-      // Rescore with updated permitSignalScore
+      // Query 2 of 3: fetch company + relations needed by scoreCompany
       const company = await db.company.findUnique({
         where: { id: companyId },
         include: { signals: true, contacts: true },
       })
 
-      if (company) {
-        const score = scoreCompany({
-          county: company.county,
-          state: company.state,
-          segments: company.segments,
-          specialties: company.specialties,
-          description: company.description,
-          website: company.website,
-          email: company.email,
-          phone: company.phone,
-          street: company.street,
-          sourceConfidence: company.sourceConfidence,
-          signals: company.signals,
-          contacts: company.contacts,
-          permitSignalScore: company.permitSignalScore,
-        })
+      if (!company) continue
 
-        await db.company.update({
-          where: { id: companyId },
-          data: { leadScore: score.leadScore, activeScore: score.activeScore },
-        })
-      }
+      // Score using the freshly computed permitSignalScore
+      const score = scoreCompany({
+        county: company.county,
+        state: company.state,
+        segments: company.segments,
+        specialties: company.specialties,
+        description: company.description,
+        website: company.website,
+        email: company.email,
+        phone: company.phone,
+        street: company.street,
+        sourceConfidence: company.sourceConfidence,
+        signals: company.signals,
+        contacts: company.contacts,
+        permitSignalScore,
+      })
+
+      // Query 3 of 3: single update with all fields at once
+      await db.company.update({
+        where: { id: companyId },
+        data: {
+          lastPermitAt,
+          permitCount30Days,
+          activeJobCount,
+          permitSignalScore,
+          leadScore: score.leadScore,
+          activeScore: score.activeScore,
+        },
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       errors.push(`Company update failed for companyId=${companyId}: ${message}`)
