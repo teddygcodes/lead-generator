@@ -16,19 +16,63 @@ async function getNews(): Promise<{ articles: NewsArticle[]; feedsLoaded: number
     const parser = new Parser({ timeout: 5000 })
 
     const FEED_QUERIES = [
-      'electrical+contractor+Atlanta+Georgia',
-      'construction+project+Gwinnett+County+Georgia',
-      'industrial+project+Hall+County+Georgia',
-      'warehouse+distribution+center+Atlanta+metro',
+      'electrical+contractor+Georgia+construction',
+      'construction+project+Georgia',
+      'industrial+development+Georgia',
+      'warehouse+distribution+center+Georgia',
       'data+center+Georgia+construction',
-      'manufacturing+plant+North+Georgia',
-      'commercial+construction+Forsyth+County+Georgia',
-      'economic+development+North+Georgia',
+      'manufacturing+plant+Georgia',
+      'commercial+construction+Georgia',
+      'economic+development+Georgia+construction+project',
     ]
 
-    const COUNTY_KEYWORDS = [
-      'Fulton', 'Gwinnett', 'Cobb', 'Forsyth', 'Hall', 'Cherokee',
-      'Barrow', 'Jackson', 'DeKalb', 'Paulding', 'Henry', 'Douglas', 'Atlanta',
+    // Statewide Georgia identifiers — used for both county tagging and Gate 2 relevance check
+    const GEORGIA_IDENTIFIERS = [
+      // Metro Atlanta
+      'Atlanta', 'Fulton', 'Gwinnett', 'Cobb', 'DeKalb', 'Clayton', 'Fayette', 'Henry',
+      'Cherokee', 'Forsyth', 'Douglas', 'Paulding', 'Rockdale', 'Newton', 'Barrow', 'Coweta',
+      // North Georgia
+      'Hall', 'Gainesville', 'Whitfield', 'Floyd', 'Bartow', 'Gordon', 'Murray', 'Walker',
+      'Catoosa', 'Rome', 'Gilmer', 'Pickens', 'Dawson', 'Habersham', 'Stephens', 'Rabun',
+      // Central / Middle Georgia
+      'Bibb', 'Macon', 'Houston', 'Baldwin', 'Monroe', 'Putnam', 'Spalding', 'Griffin',
+      // Augusta / East Georgia
+      'Richmond', 'Augusta', 'Columbia', 'Burke', 'Jefferson', 'McDuffie',
+      // Savannah / Coastal Georgia
+      'Chatham', 'Savannah', 'Bryan', 'Effingham', 'Liberty', 'Glynn', 'Brunswick', 'Camden',
+      // Columbus / West Georgia
+      'Muscogee', 'Columbus', 'Harris', 'Peach', 'Taylor',
+      // Albany / Southwest Georgia
+      'Dougherty', 'Albany', 'Lowndes', 'Valdosta', 'Tift', 'Colquitt', 'Thomas', 'Grady',
+      // Athens / Northeast Georgia
+      'Clarke', 'Athens', 'Oconee', 'Madison', 'Elbert', 'Hart', 'Franklin',
+      // Generic
+      'Georgia', ' GA ',
+    ]
+
+    // Gate 1 — hard reject: irrelevant content types and neighboring-state collisions
+    const BLOCKLIST = [
+      'obituary', 'obit', 'funeral', 'passed away', 'in memoriam',
+      'memorial service', 'visitation', 'interment', 'survivors include',
+      'sports', 'quarterback', 'touchdown', 'playoff', 'standings',
+      'lottery', 'jackpot', 'powerball', 'mega millions',
+      'election', 'candidate', 'ballot', 'voter', 'campaign',
+      'murder', 'shooting', 'arrested', 'indicted', 'sentenced',
+      'missing person', 'amber alert',
+      // Neighboring states — catches Forsyth/Columbus/Rome name collisions (e.g. Forsyth County NC)
+      'north carolina', 'south carolina', 'tennessee', 'alabama', 'florida',
+      ' nc ', ' sc ', ' tn ', ' al ', ' fl ',
+    ]
+
+    // Gate 3 — must contain a construction/industry signal
+    const CONSTRUCTION_KEYWORDS = [
+      'construction', 'development', 'project', 'build', 'building',
+      'renovation', 'expansion', 'facility', 'plant', 'warehouse', 'center',
+      'contractor', 'subcontractor', 'electrical', 'electric',
+      'manufacturing', 'industrial', 'distribution', 'data center', 'logistics', 'fulfillment',
+      'office', 'retail', 'mixed-use', 'multifamily', 'apartment', 'hotel',
+      'headquarters', 'campus', 'investment', 'groundbreaking', 'ribbon cutting',
+      'jobs', 'hiring', 'relocat', 'permit',
     ]
 
     const CATEGORY_RULES = [
@@ -39,8 +83,8 @@ async function getNews(): Promise<{ articles: NewsArticle[]; feedsLoaded: number
 
     function detectCounty(text: string): string | null {
       const lower = text.toLowerCase()
-      for (const county of COUNTY_KEYWORDS) {
-        if (lower.includes(county.toLowerCase())) return county
+      for (const id of GEORGIA_IDENTIFIERS) {
+        if (lower.includes(id.toLowerCase())) return id
       }
       return null
     }
@@ -96,9 +140,22 @@ async function getNews(): Promise<{ articles: NewsArticle[]; feedsLoaded: number
       }
     }
 
+    // Three-gate relevance filter
+    const relevant = raw.filter((article) => {
+      const text = `${article.title} ${article.description ?? ''}`
+      const lower = text.toLowerCase()
+      // Gate 1 — hard reject blocklisted content
+      if (BLOCKLIST.some((b) => lower.includes(b))) return false
+      // Gate 2 — must mention Georgia or a Georgia city/county
+      if (!GEORGIA_IDENTIFIERS.some((id) => lower.includes(id.toLowerCase()))) return false
+      // Gate 3 — must have a construction/industry signal
+      if (!CONSTRUCTION_KEYWORDS.some((k) => lower.includes(k))) return false
+      return true
+    })
+
     const seen = new Set<string>()
     const deduped: NewsArticle[] = []
-    for (const article of raw) {
+    for (const article of relevant) {
       const norm = article.title.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().slice(0, 60)
       if (seen.has(norm)) continue
       seen.add(norm)

@@ -40,7 +40,7 @@ export function NewsFeed({ articles, feedsLoaded, feedsFailed }: NewsFeedProps) 
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
         <span className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
           <Newspaper size={13} className="text-gray-400" />
-          North Georgia &amp; Atlanta Project News
+          Georgia Construction News
         </span>
         {feedsFailed > 0 && (
           <span className="text-[10px] text-gray-400">
