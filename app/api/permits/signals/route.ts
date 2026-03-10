@@ -52,11 +52,17 @@ export async function GET() {
     take: 100,
   })
 
-  // Sort in TypeScript to avoid raw SQL for complex ordering
-  permits.sort(
-    (a, b) =>
-      sortKey(b) - sortKey(a) || b.filedAt.getTime() - a.filedAt.getTime(),
-  )
+  // Sort in TypeScript to avoid raw SQL for complex ordering.
+  // Tier 1: confirmed jobValue comes before all estimated permits.
+  // Tier 2: within confirmed → jobValue DESC; within estimated → bucket weight DESC.
+  // Tier 3: filedAt DESC as tiebreaker.
+  permits.sort((a, b) => {
+    const aConfirmed = a.jobValue !== null
+    const bConfirmed = b.jobValue !== null
+    if (aConfirmed !== bConfirmed) return aConfirmed ? -1 : 1
+    const diff = sortKey(b) - sortKey(a)
+    return diff !== 0 ? diff : b.filedAt.getTime() - a.filedAt.getTime()
+  })
 
   const top25 = permits.slice(0, 25)
 
@@ -86,7 +92,7 @@ export async function GET() {
         ? {
             id: p.company.id,
             name: p.company.name,
-            score: p.company.leadScore,
+            leadScore: p.company.leadScore,
             lastContactedAt: p.company.lastContactedAt,
           }
         : null,
