@@ -157,6 +157,7 @@ async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
       sourceConfidence: updated.sourceConfidence,
       signals: updated.signals,
       contacts: updated.contacts,
+      permitSignalScore: updated.permitSignalScore ?? 0,
     })
     await db.company.update({
       where: { id: companyId },

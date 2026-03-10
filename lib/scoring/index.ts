@@ -11,6 +11,8 @@ export interface ScoringInput {
   phone?: string | null
   street?: string | null
   sourceConfidence?: number | null // AI enrichment confidence (0-1), stored on Company.sourceConfidence
+  permitSignalScore?: number | null // Pre-computed permit activity score, stored on Company.permitSignalScore
+  permitCount30Days?: number | null // Number of permits filed in the last 30 days, for richer reason string
   signals?: Array<{
     signalDate?: Date | null
     signalType?: string
@@ -219,6 +221,14 @@ export function scoreCompany(input: ScoringInput): ScoreOutput {
   if (isTargetCounty) active += 10
   if (hasIndustrial) active += 8
   else if (hasCommercial) active += 5
+
+  // ---- Permit signal score ----
+  if (input.permitSignalScore && input.permitSignalScore > 0) {
+    const pts = cap(input.permitSignalScore, SCORE_CONFIG.permit.maxScore)
+    lead += pts
+    const countNote = input.permitCount30Days ? ` (${input.permitCount30Days} permits in 30 days)` : ''
+    reasons.push(`Active permit activity${countNote} → +${pts} pts`)
+  }
 
   const finalLead = cap(lead, SCORE_CONFIG.maxScore)
   const finalActive = cap(active, SCORE_CONFIG.maxScore)

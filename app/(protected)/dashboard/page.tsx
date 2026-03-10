@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { Building2, Radio, Upload, Target, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 import { TerritoryMap } from '@/components/dashboard/TerritoryMap'
+import { PermitSignals } from '@/components/dashboard/PermitSignals'
 import { TopLeads } from '@/components/dashboard/TopLeads'
 import { NewsFeed } from '@/components/dashboard/NewsFeed'
 import type { NewsArticle } from '@/app/api/dashboard/news/route'
@@ -243,6 +244,9 @@ export default async function DashboardPage() {
 
       {/* Territory map — full width */}
       <TerritoryMap />
+
+      {/* Permit signals — full width */}
+      <PermitSignals />
 
       {/* Two-column: top leads + news feed */}
       <div className="grid grid-cols-2 gap-4">
