@@ -86,6 +86,53 @@ export async function findPlaceForCompany(
 }
 
 /**
+ * Search Google Places for a category query (e.g. "electricians Hall County GA").
+ * Returns up to 20 results per page. Pass pageToken to fetch subsequent pages.
+ */
+export async function searchPlaces(
+  query: string,
+  pageToken?: string,
+): Promise<{ results: PlaceResult[]; nextPageToken?: string }> {
+  if (!isGooglePlacesConfigured()) return { results: [] }
+
+  try {
+    const body: Record<string, unknown> = { textQuery: query, maxResultCount: 20 }
+    if (pageToken) body.pageToken = pageToken
+
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
+        'X-Goog-FieldMask': FIELD_MASK,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    })
+
+    if (!res.ok) return { results: [] }
+    const data = await res.json()
+
+    const results: PlaceResult[] = (data.places ?? []).map((place: Record<string, unknown>) => ({
+      placeId: (place.id as string) ?? '',
+      name: ((place.displayName as { text?: string }) ?? {}).text ?? '',
+      phone: (place.nationalPhoneNumber as string | null) ?? null,
+      website: (place.websiteUri as string | null) ?? null,
+      formattedAddress: (place.formattedAddress as string | null) ?? null,
+      rating: (place.rating as number | null) ?? null,
+      userRatingCount: (place.userRatingCount as number | null) ?? null,
+      types: (place.types as string[]) ?? [],
+      businessStatus: (place.businessStatus as string | null) ?? null,
+      googleMapsUri: (place.googleMapsUri as string | null) ?? null,
+    }))
+
+    return { results, nextPageToken: (data.nextPageToken as string) ?? undefined }
+  } catch {
+    return { results: [] }
+  }
+}
+
+/**
  * Build a plain-text summary of a Places result for AI enrichment.
  */
 export function buildPlaceText(place: PlaceResult, companyName: string): string {

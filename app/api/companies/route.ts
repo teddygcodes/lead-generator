@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
-import { CompanyFiltersSchema } from '@/lib/validation/schemas'
+import { CompanyFiltersSchema, CompanyCreateSchema } from '@/lib/validation/schemas'
+import { normalizeName, extractDomain } from '@/lib/normalization'
 import { buildPaginatedResponse } from '@/lib/pagination'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 export async function GET(req: NextRequest) {
   const { userId } = await auth()
@@ -92,4 +93,54 @@ export async function GET(req: NextRequest) {
   ])
 
   return NextResponse.json(buildPaginatedResponse(companies, total, page, limit))
+}
+
+export async function POST(req: NextRequest) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json()
+  const parsed = CompanyCreateSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
+
+  const { name, county, phone, website, status, recordOrigin } = parsed.data
+
+  const baseData = {
+    name,
+    normalizedName: normalizeName(name),
+    county: county ?? null,
+    phone: phone ?? null,
+    website: website ?? null,
+    domain: website ? extractDomain(website) : null,
+    state: 'GA',
+    status,
+    recordOrigin,
+    leadScore: 0,
+  }
+
+  try {
+    const company = await db.company.create({
+      data: baseData,
+      select: { id: true, name: true, status: true, county: true },
+    })
+    return NextResponse.json(company, { status: 201 })
+  } catch (err) {
+    // If domain unique constraint fires (e.g. directory URL like nextdoor.com),
+    // retry without setting domain — website still saves.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      (err.meta?.target as string[] | undefined)?.includes('domain')
+    ) {
+      const company = await db.company.create({
+        data: { ...baseData, domain: null },
+        select: { id: true, name: true, status: true, county: true },
+      })
+      return NextResponse.json(company, { status: 201 })
+    }
+    const message = err instanceof Error ? err.message : 'Failed to create company'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { db } from '@/lib/db'
+import { Prisma } from '@prisma/client'
 import { CompanyPatchSchema } from '@/lib/validation/schemas'
 import { scoreCompany } from '@/lib/scoring'
+import { extractDomain } from '@/lib/normalization'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -83,11 +85,39 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const existing = await db.company.findUnique({ where: { id }, select: { id: true } })
   if (!existing) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
 
-  const updated = await db.company.update({
-    where: { id },
-    data: parsed.data,
-    select: { id: true, status: true, doNotContact: true, notes: true, updatedAt: true },
-  })
+  // When website is being set, also derive + update domain
+  const { website, ...rest } = parsed.data
+  const updateData = {
+    ...rest,
+    ...(website !== undefined
+      ? { website, domain: website ? extractDomain(website) : null }
+      : {}),
+  }
 
-  return NextResponse.json(updated)
+  try {
+    const updated = await db.company.update({
+      where: { id },
+      data: updateData,
+      select: { id: true, status: true, doNotContact: true, notes: true, website: true, domain: true, updatedAt: true },
+    })
+    return NextResponse.json(updated)
+  } catch (err) {
+    // If domain unique constraint fires (e.g. two companies share a directory URL like thumbtack.com),
+    // retry without setting domain — the website still saves, enrichment won't use a shared domain.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      (err.meta?.target as string[] | undefined)?.includes('domain')
+    ) {
+      const { domain: _domain, ...dataWithoutDomain } = updateData as typeof updateData & { domain?: string | null }
+      const updated = await db.company.update({
+        where: { id },
+        data: { ...dataWithoutDomain, domain: null },
+        select: { id: true, status: true, doNotContact: true, notes: true, website: true, domain: true, updatedAt: true },
+      })
+      return NextResponse.json(updated)
+    }
+    const message = err instanceof Error ? err.message : 'Failed to update company'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }

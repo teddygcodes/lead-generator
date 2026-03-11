@@ -6,6 +6,7 @@ import { formatDate, formatPhone } from '@/lib/format'
 import { Globe, Phone, Mail, MapPin, Calendar, Radio, Users, Tag, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { EnrichButton } from '@/components/companies/EnrichButton'
+import { WebsiteEditor } from '@/components/companies/WebsiteEditor'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,17 +85,11 @@ export default async function CompanyDetailPage({ params }: Params) {
 
         {/* Contactability row */}
         <div className="mt-3 flex items-center gap-4 flex-wrap">
-          {company.website && (
-            <a
-              href={company.website.startsWith('http') ? company.website : `https://${company.website}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
-            >
-              <Globe size={12} />
-              {company.domain ?? company.website}
-            </a>
-          )}
+          <WebsiteEditor
+            companyId={company.id}
+            initialWebsite={company.website}
+            initialDomain={company.domain}
+          />
           {company.phone && (
             <a
               href={`tel:${company.phone}`}
