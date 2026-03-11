@@ -1,36 +1,118 @@
 # Electrical Leads Engine
 
-> Internal sales intelligence tool for Atlanta metro and North Georgia electrical contractor leads.
-
-Built for electrical distribution reps who need to know which contractors are active, what they're working on, and who to call next. Login-protected. Data stays yours.
+An internal sales intelligence tool for electrical distribution reps covering Atlanta metro and North Georgia. It aggregates electrical contractor data from public permit portals and Google Places, scores each company by geography, segment fit, and permit activity, and presents it as a searchable, filterable lead database. The difference from a spreadsheet or generic CRM is that data is actively pulled from live permit systems, enriched via website scraping and AI, and scored with transparent reasons — so a rep can open the dashboard and immediately know which contractors are working, where, and how to open the conversation.
 
 ---
 
-## What it does
+## Features
 
-- **Company database** — stores electrical contractor records with scoring, segments, and contact info
-- **Lead scoring** — transparent scores with mapped reasons (geography, segment fit, permit activity, signals, contacts)
-- **Live permit sync** — scrapes ACA citizen portals for Atlanta/Fulton, Gwinnett, and Hall County; auto-matches contractors to company records and updates lead scores
-- **CSV import** — staged import flow: parse → preview → map → validate → commit
-- **Website enrichment** — fetches contractor websites, extracts emails/phones/service keywords
-- **AI enrichment** — Anthropic or OpenAI wrapper with structured output validation and keyword fallback
-- **Signal tracking** — permit activity, website signals, and contact data all feed into scores
-- **Jobs log** — full visibility into crawl history, errors, and source run status
+### Dashboard
+- Five summary cards: total companies, signals this week, CSV imports this week, uncontacted companies with lead score ≥ 60, companies not yet enriched
+- Territory map: D3-geo SVG of North Georgia/Atlanta metro counties color-coded by lead density, clickable to filter
+- Permit signals: recent permits matched to companies, with status and job value
+- Top leads: highest-scoring un-contacted companies
+- Construction news feed: Georgia construction articles pulled from Google News RSS, filtered through a three-gate relevance check (blocklist, Georgia location match, construction keyword match), deduped and sorted by date
+
+### Companies
+- Paginated, sortable table of all contractor records (real data only by default; toggle to include demo seed data)
+- Filter by: free-text search, county, segment, status (NEW / QUALIFYING / ACTIVE / INACTIVE / DO\_NOT\_CONTACT), minimum lead score, has website, has email
+- Find Websites: bulk Google CSE lookup to populate missing website URLs (100 free queries/day)
+- Enrich All: batch website enrichment for up to 10 companies at once
+
+### Company detail
+- Lead score (0–100) and active score with a plain-English `reasons[]` list explaining every rule that fired
+- AI-generated outreach angle, likely product demand categories, estimated sales motion, and buyer value tier
+- Editable website URL
+- Segments (industrial / commercial / residential / mixed) and specialties extracted by AI or keyword classifier
+- AI summary (2–3 sentences from website content)
+- Signals timeline (permit activity, website enrichment, discovery events)
+- Contacts list with phone and email
+- Permits list linked to this company (number, type, status, address, filed date)
+- Enrich button triggers single-company website crawl
+
+### Permits
+- Per-county permit browser: Gwinnett, Hall, Fulton, DeKalb, Cherokee
+- Sync per county (triggers the full ingest → dedupe → upsert → match → rescore pipeline)
+- Rematch: re-run company matching for a county using the current algorithm (useful after algorithm fixes)
+- Stats: permit count, last synced, newest permit date per county
+
+### Prospecting
+- Split-pane view: clickable county map on the left, search results on the right
+- Google Places Text Search for free-text or preset queries (e.g. "Electricians Gwinnett County GA")
+- Preset queries update when you click a county on the map
+- Each result shows phone, address, rating, website, and whether it's already in the database
+- Add individual companies or "Add All New" in bulk
+
+### Import
+- Upload a CSV file, preview parsed rows, map columns, then commit
+- Validated against Zod schemas before any DB write
+- Recognized columns: `name`, `website`, `phone`, `email`, `city`, `county`, `state`, `zip`, `street`, `segments`, `specialties`
+
+### Jobs
+- Manual trigger panel for: Company Discovery, Website Enrichment, Business Registry
+- Displays last run time and record counts for each source
+- Full CrawlJob history table (status, records found/created/updated, error messages)
 
 ---
 
-## Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 15 App Router + TypeScript |
+| Framework | Next.js 15 App Router, TypeScript |
 | Styling | Tailwind CSS v3 |
 | Auth | Clerk v6 |
 | ORM | Prisma v5 |
 | Database | PostgreSQL (Supabase) |
-| Validation | zod |
-| Testing | vitest |
+| Validation | Zod |
+| Testing | Vitest |
 | Package manager | pnpm |
+| Maps | D3-geo (SVG, no tile service) |
+| HTML scraping | node-html-parser |
+| CSV parsing | csv-parse |
+| News | rss-parser |
+| Icons | lucide-react |
+
+---
+
+## Data sources
+
+### Permit adapters
+
+| County | Adapter | Status | Contractor name available |
+|---|---|---|---|
+| Gwinnett | ACA citizen portal scraper (`accela-aca.ts`) | Active | Yes |
+| Hall | ACA citizen portal scraper (`accela-aca.ts`) | Active | Yes (assigned at permit issuance) |
+| Fulton / Atlanta | ACA citizen portal scraper (`accela-aca.ts`) | Active | Yes |
+| DeKalb | ArcGIS FeatureServer REST API (`dekalb.ts`) | Active | Yes |
+| Cherokee | PHP portal HTML scraper (`cherokee.ts`) | Active | Yes |
+| Gwinnett / Hall / Fulton | Accela REST API (`accela.ts`) | Inactive — app registered, county authorization not yet granted | Would be yes |
+| Cobb | — | No adapter — Cobb County not found in Accela developer system | — |
+| Forsyth / Jackson | EnerGov REST API | Removed — search results do not include contractor names, so permits cannot be matched to companies | No |
+
+The ACA scraper works against the public ASP.NET WebForms portal at `aca-prod.accela.com`. It manages session cookies and VIEWSTATE automatically, paginates through all result pages, and fetches each permit's detail page to extract the contractor business name, phone, and license number. No API key required.
+
+The Accela REST API adapter (`accela.ts`) is fully implemented with OAuth2 client\_credentials auth but returns empty results because each county must separately authorize the developer app in their Accela admin portal. Once a county grants access, it activates automatically — no code changes needed.
+
+### Google Places
+Used for:
+- **Prospecting** (`/api/places/search`): Text Search to discover new contractors by category + location
+- **Company enrichment fallback** (`/api/places/check`, `/api/places/add`): profile lookup for companies without a website
+
+Requires `GOOGLE_PLACES_API_KEY` with the "Places API (New)" enabled in Google Cloud Console.
+
+### Google Custom Search (website finder)
+Used to locate a company's website when the record has no URL. Tries up to three query variations; filters out directory sites (Yelp, YellowPages, BBB, etc.). Free tier: 100 queries/day.
+
+Requires `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ENGINE_ID`.
+
+### AI enrichment
+Calls the configured provider (Anthropic or OpenAI) with extracted website text and a structured prompt. Returns segment classification, specialties, service areas, employee size estimate, a summary, buyer profile, confidence score, and an outreach angle. Output is validated with Zod. Falls back to a keyword classifier if the API key is absent or the call fails.
+
+Default provider: Anthropic (`claude-3-5-sonnet-20241022`).
+
+### Construction news feed
+Fetches Google News RSS for eight Georgia construction queries on each dashboard load. Applies a three-gate filter: hard blocklist (obituaries, sports, crime), Georgia location check, construction keyword check. Dedupes by normalized title and returns the 15 most recent articles. Cached by Next.js revalidation.
 
 ---
 
@@ -39,39 +121,31 @@ Built for electrical distribution reps who need to know which contractors are ac
 ### Prerequisites
 
 - Node.js 18+
-- pnpm — `npm install -g pnpm`
-- [Supabase](https://supabase.com) project (free tier works)
-- [Clerk](https://clerk.com) application (free tier works)
+- pnpm (`npm install -g pnpm`)
+- A [Supabase](https://supabase.com) project (free tier works)
+- A [Clerk](https://clerk.com) application (free tier works)
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/teddygcodes/lead-generator.git
+git clone <repo-url>
 cd lead-generator
 pnpm install
 ```
 
-### 2. Set up environment
+### 2. Configure environment
 
 ```bash
 cp .env.example .env.local
 ```
 
-Fill in `.env.local`:
-
-| Variable | Where to get it |
-|---|---|
-| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string (pooled) |
-| `DIRECT_URL` | Supabase → Project Settings → Database → Connection string (direct) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → API Keys |
-| `CLERK_SECRET_KEY` | Clerk Dashboard → API Keys |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) (optional — falls back to keyword classifier) |
+Edit `.env.local` with your credentials. See the env vars table below.
 
 ### 3. Migrate and seed
 
 ```bash
-pnpm db:migrate   # Apply schema to your database
-pnpm db:seed      # Load 24 demo companies across 6 counties
+pnpm db:migrate   # Apply schema
+pnpm db:seed      # Load demo companies (optional)
 ```
 
 ### 4. Run
@@ -84,18 +158,32 @@ Open [http://localhost:3000](http://localhost:3000). Sign in via Clerk. You'll l
 
 ---
 
-## Commands
+## Environment variables
 
-```bash
-pnpm dev          # Development server
-pnpm build        # Production build
-pnpm lint         # ESLint
-pnpm test         # Unit tests (91 passing)
-pnpm db:migrate   # Run Prisma migrations
-pnpm db:generate  # Regenerate Prisma client
-pnpm db:seed      # Seed demo data
-pnpm db:studio    # Prisma Studio (database GUI)
-```
+| Variable | What it's for | Required |
+|---|---|---|
+| `DATABASE_URL` | Supabase Postgres connection string with pgbouncer (pooled) | Yes |
+| `DIRECT_URL` | Supabase Postgres direct connection string (used by Prisma migrations) | Yes |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key | Yes |
+| `CLERK_SECRET_KEY` | Clerk secret key | Yes |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Clerk sign-in route (default: `/sign-in`) | Yes |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Clerk sign-up route (default: `/sign-in`) | Yes |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Redirect after sign-in (default: `/dashboard`) | Yes |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Redirect after sign-up (default: `/dashboard`) | Yes |
+| `AI_PROVIDER` | AI provider: `anthropic` (default) or `openai` | No |
+| `AI_MODEL` | Model ID (default: `claude-3-5-sonnet-20241022`) | No |
+| `ANTHROPIC_API_KEY` | Anthropic API key for AI enrichment | No — falls back to keyword classifier |
+| `OPENAI_API_KEY` | OpenAI API key (used when `AI_PROVIDER=openai`) | No |
+| `ENRICHMENT_TIMEOUT_MS` | Per-page fetch timeout in ms (default: `10000`) | No |
+| `ENRICHMENT_MAX_PAGES` | Max pages to crawl per company (default: `4`) | No |
+| `GOOGLE_CSE_API_KEY` | Google Custom Search JSON API key (website finder) | No — feature disabled without it |
+| `GOOGLE_CSE_ENGINE_ID` | Programmable Search Engine ID (website finder) | No — feature disabled without it |
+| `GOOGLE_PLACES_API_KEY` | Google Places API (New) key (prospecting + enrichment fallback) | No — Prospecting page disabled without it |
+| `OPENCORPORATES_API_KEY` | OpenCorporates API key (business registry adapter) | No — adapter returns nothing without it |
+| `ACCELA_APP_ID` | Accela developer app ID (REST API permit adapter) | No — adapter returns [] without it or without county authorization |
+| `ACCELA_APP_SECRET` | Accela developer app secret | No |
+| `PERMIT_BATCH_SIZE` | ArcGIS result record count per page (default: `100`, max: `1000`) | No |
+| `PERMIT_LOOKBACK_DAYS` | Days back for permit queries (default: `90`) | No |
 
 ---
 
@@ -103,70 +191,100 @@ pnpm db:studio    # Prisma Studio (database GUI)
 
 ```
 app/
-  (protected)/          Auth-gated pages
-    dashboard/          Summary stats, permit signals widget, job log
-    companies/          Filterable, sortable contractor table
-    companies/[id]/     Detail: identity, score, reasons, signals, contacts, permits
-    jobs/               CrawlJob operational log
-    import/             Staged CSV import flow
+  (protected)/              Auth-gated pages (Clerk middleware)
+    dashboard/              Stats, territory map, permit signals, top leads, news feed
+    companies/              Filterable contractor table
+    companies/[id]/         Company detail: score, signals, contacts, permits
+    permits/                Per-county permit browser with sync and rematch
+    prospecting/            Google Places discovery with county map
+    import/                 Staged CSV import
+    jobs/                   Job control panel and history
+    settings/               Placeholder (no functionality yet)
   api/
-    companies/          GET list + filters, GET/PATCH by ID
-    permits/
-      sync              POST — trigger permit ingest from all active sources
-      signals           GET — recent permits with matched company scores
-    jobs/               GET paginated job history, POST manual trigger
-    import/csv/         POST preview (no DB write), POST commit
-    enrich/             POST single company, POST batch (≤10)
-    health/             GET public health check
+    companies/              GET list, POST (internal), GET/PATCH/DELETE by id
+    companies/find-websites POST — bulk Google CSE website lookup
+    companies/merge         POST — merge two company records
+    companies/batch-delete  POST — delete multiple companies
+    enrich/company/[id]     POST — single-company website enrichment
+    enrich/batch            POST — batch enrichment (max 10)
+    import/csv/preview      POST — parse CSV, return preview (no DB write)
+    import/csv/commit       POST — validate and persist CSV rows
+    permits/list            GET — paginated permit list with filters
+    permits/sync            POST — trigger permit ingest for one or all counties
+    permits/bulk-sync       POST — sync all counties in sequence
+    permits/rematch         POST — re-run company matching for a county
+    permits/signals         GET — recent permits with matched company data (dashboard widget)
+    permits/stats           GET — per-county permit counts and last-sync timestamps
+    permits/[id]            GET — single permit detail
+    places/search           GET — Google Places Text Search
+    places/check            GET — check which places are already in the DB
+    places/add              POST — add Places results to the DB
+    jobs/                   GET — CrawlJob history
+    jobs/run                POST — trigger a job manually
+    dashboard/top-leads     GET — top uncontacted companies
+    dashboard/news          GET — Georgia construction news (RSS)
+    dashboard/map-data      GET — county-level stats for territory map
+    dashboard/county/[c]    GET — company list for a specific county
+    dashboard/company/[id]/contact  GET — company contact info
+    rescore                 POST — recompute scores for all or selected companies
+    health                  GET — public health check
 
 lib/
-  permits/
-    base.ts             NormalizedPermit type, normalizeStatus, isResidential helpers
-    accela-aca.ts       ACA citizen portal HTML scraper — Fulton, Gwinnett, Hall County
-                        (session cookies + VIEWSTATE, no API key required)
-    accela.ts           Accela REST API adapter (inactive — pending county authorization)
-  jobs/
-    sync-permits.ts     Full permit pipeline: ingest → dedupe → upsert → match → rescore
-  normalization/        Name, domain, phone, address normalization
-  dedupe/               Dedup strategy: domain → normalized name → phone
-  scoring/              Lead score + active score with transparent reasons[]
-    config.ts           All weights in one place (single source of truth)
+  scoring/
+    config.ts               All score weights (single source of truth)
+    index.ts                scoreCompany() — returns leadScore, activeScore, reasons[], outreachAngle
   enrichment/
-    index.ts            Website fetch + HTML extraction (same-domain, 4 pages max)
-    keywords.ts         Keyword classifier — works without AI
-  ai/                   Provider-agnostic wrapper (raw fetch, zod-validated output)
+    index.ts                enrichFromWebsite(), enrichCompany() — crawls up to 4 pages, respects robots.txt
+    keywords.ts             classifyText() — keyword-based segment/specialty classifier (AI fallback)
+    pipeline.ts             runFullEnrichment() — orchestrates website + AI enrichment
+  ai/
+    index.ts                enrichWithAI() — provider-agnostic wrapper, Zod-validated output
+  permits/
+    base.ts                 NormalizedPermit type, normalizeStatus(), isResidential()
+    accela.ts               Accela REST API adapter (inactive — pending county auth)
+    accela-aca.ts           ACA citizen portal scraper — Gwinnett, Hall, Fulton
+    dekalb.ts               DeKalb County ArcGIS FeatureServer adapter
+    cherokee.ts             Cherokee County PHP portal scraper
+    energov.ts              EnerGov adapter (implemented but not in active sources)
+  jobs/
+    sync-permits.ts         Full permit pipeline: fetch → dedupe → upsert → match → rescore
+    runner.ts               Job runner for company discovery and enrichment jobs
+    estimate-permit-value.ts  Estimates job value bucket from permit description text
   sources/
-    base.ts             SourceAdapter interface
-    company-site.ts     Website enrichment adapter
-    business-registry.ts  Business Registry adapter (demo mode — see below)
-  validation/schemas.ts Centralized zod schemas (never inline)
+    company-site.ts         Company website enrichment adapter
+    google-places.ts        Google Places API (New) adapter
+    website-finder.ts       Google Custom Search website finder
+    business-registry.ts    OpenCorporates business registry adapter
+    company-discovery.ts    Company discovery source
+    base.ts                 SourceAdapter interface
+  normalization/
+    index.ts                normalizeName(), normalizeDomain(), normalizePhone()
+    geocode-county.ts       City → county inference for Georgia
+    georgia-cities.ts       Georgia city/county lookup table
+  dedupe/
+    index.ts                findExistingCompany() — domain → normalized name → phone
+  companies/
+    merge.ts                mergeCompanyData() — combine two company records
+  validation/
+    schemas.ts              All Zod schemas (CompanyFiltersSchema, ImportRowSchema, etc.)
+  pagination.ts             buildPaginatedResponse()
+  format.ts                 formatDate(), formatPhone()
+  db.ts                     Prisma client singleton
 
 components/
-  layout/               Sidebar, NavLink
-  ui/                   Badge, EmptyState
-  companies/            FilterBar, CompaniesTable, EnrichButton
-  dashboard/            PermitSignals widget (active permit activity + Sync Now)
-  import/               ImportFlow (5-stage CSV import)
+  layout/                   Sidebar, NavLink
+  ui/                       Badge, EmptyState
+  companies/                CompaniesTable, FilterBar, EnrichButton, EnrichAllButton,
+                            FindWebsitesButton, WebsiteEditor
+  dashboard/                TerritoryMap, PermitSignals, TopLeads, NewsFeed, CountyPanel
+  permits/                  PermitsBrowser, PermitSlideOver
+  prospecting/              ProspectingView, CountyMap
+  import/                   ImportFlow
+  jobs/                     JobControlPanel, JobHistoryList
 
 prisma/
-  schema.prisma         Company, Signal, Contact, CrawlJob, UserNote, Tag, Permit
-  seed.ts               24 demo companies across Gwinnett, Hall, Forsyth, Cobb, Fulton, Cherokee
+  schema.prisma             Company, Signal, Contact, CrawlJob, UserNote, Tag, CompanyTag, Permit
 ```
-
----
-
-## Adding real contractor data
-
-**CSV import** is the fastest path. Go to `/import` and upload any `.csv` with at minimum a `name` column. Recognized headers: `name`, `website`, `phone`, `email`, `city`, `county`, `state`, `zip`, `segments`, `specialties`, `street`.
-
-Free data sources for Georgia electrical contractors:
-- [Georgia Secretary of State — Business Search](https://ecorp.sos.ga.gov)
-- [Georgia Secretary of State — License Lookup](https://sos.ga.gov/index.php/licensing)
-- Your existing spreadsheet or CRM export
-
-After import, use `/api/enrich/batch` or the Enrich button on individual company pages to pull data from their websites.
-
-**Permit sync** runs automatically via Sync Now on the dashboard, or `POST /api/permits/sync`. New contractors discovered in permit data are auto-created as Company records and queued for enrichment.
 
 ---
 
@@ -174,81 +292,48 @@ After import, use `/api/enrich/batch` or the Enrich button on individual company
 
 Every company gets two scores:
 
-- **Lead score** — long-term potential based on geography, segment fit, specialties, and permit activity
-- **Active score** — current engagement based on recent signals, website presence, and contact availability
+**Lead score (0–100):** long-term sales potential. Inputs:
+- Geography: +15 if in a primary target county (Gwinnett, Hall, Forsyth, Cobb, Fulton, Cherokee), +5 if in Georgia
+- Segment: +20 industrial, +15 commercial-only, +10 mixed non-industrial, +5 residential
+- Specialties: high-value keywords (switchgear, panelboards, controls, generators, EV charging, industrial maintenance) earn 6 pts each, capped at 15; standard keywords earn 2 pts each, capped at 6
+- Completeness: website (+5), email (+5), phone (+3), street address (+2)
+- Signals: each signal adds 1 pt to lead score, capped at 5
+- Contacts: +5 if any contact, +5 if contact has email, +3 if contact has phone
+- Description language: industrial terms +4, commercial terms +4
+- Permit signal score: up to 25 pts based on permit volume and job value in the last 30 days
+- AI confidence: +3 if confidence ≥ 0.75, +1 if ≥ 0.50
 
-Both scores come with `reasons[]` — a plain-English list of exactly which rules fired. No black boxes.
+**Active score:** current engagement based on signal recency (within 30/90/180 days) and volume.
 
-Permit activity contributes up to 25 pts to the lead score via a tiered volume bonus (permits filed in the last 30 days). Since public ACA portals don't expose job value, permit count is the primary signal — a contractor pulling 15+ permits per month earns the full volume bonus.
+Every score includes a `reasons[]` array — a plain-English list of which rules contributed. The company detail page displays this alongside an AI-generated outreach angle.
 
-Score weights live in `lib/scoring/config.ts` — edit them to match your territory priorities.
-
----
-
-## Permit sync — how it works
-
-The permit pipeline runs against the [Accela ACA citizen portal](https://aca-prod.accela.com) — a public-facing ASP.NET WebForms site that requires no API key or OAuth. The scraper:
-
-1. Opens a session (GET → extract VIEWSTATE + session cookies)
-2. POSTs a search for electrical permit types over the last 30 days
-3. Paginates through all results, then fetches each permit's detail page for contractor info
-4. Upserts all permits, fuzzy-matches contractor names against existing Company records
-5. Creates new Company records for unmatched contractors with qualifying keywords
-6. Recomputes `permitSignalScore`, `permitCount30Days`, `leadScore`, and `activeScore` for all affected companies
-
-**Active sources:**
-| County | Source | Contractor name? |
-|---|---|---|
-| Fulton (Atlanta) | ACA scraper | ✅ |
-| Gwinnett | ACA scraper | ✅ |
-| Hall | ACA scraper | ✅ (most recent permits pending — contractor assigned at issue) |
-| Gwinnett / Hall / Fulton | Accela REST API | ⛔ Inactive — awaiting county authorization |
+Weights are centralized in `lib/scoring/config.ts`.
 
 ---
 
-## Deferred work
+## Commands
 
-### Permit coverage — Cobb, Cherokee, Forsyth, Jackson
-**Cobb + Cherokee:** No permit source yet. Both are target counties in the scoring config (15 pts geography bonus). Accela REST API would work once authorized.
-
-**Forsyth + Jackson:** EnerGov REST API is accessible and was previously integrated, but the search endpoint doesn't return contractor names — permits can't be matched to companies. Re-add if a detail endpoint with contractor info becomes available.
-
-### Accela REST API
-The Accela developer REST API (`apis.accela.com/v4/records`) is fully implemented in `lib/permits/accela.ts` but returns `[]` for all three agencies until each county explicitly authorizes our developer application. No code changes needed — authorization is administrative.
-
-### License adapter
-**Status: Demo stub.** Returns fixture data. To connect live license data:
-- Georgia SOS Licensing Division bulk data or scrape of [sos.ga.gov/licensing](https://sos.ga.gov/index.php/licensing)
-
-### Integration tests
-Unit tests cover normalization, dedupe, scoring, keywords, and API schema validation (91 tests). Integration tests with a live DB are not implemented.
-
-### Job queue
-Enrichment runs are sequential. No distributed queue or background workers — suitable for manual/on-demand enrichment at current scale.
+```bash
+pnpm dev          # Development server (Next.js)
+pnpm build        # Production build
+pnpm start        # Start production server
+pnpm lint         # ESLint
+pnpm test         # Vitest unit tests
+pnpm test:watch   # Vitest in watch mode
+pnpm db:migrate   # Run Prisma migrations
+pnpm db:generate  # Regenerate Prisma client after schema changes
+pnpm db:seed      # Seed demo companies
+pnpm db:studio    # Open Prisma Studio
+```
 
 ---
 
-## API reference
+## Known gaps
 
-All business routes require a valid Clerk session. Errors return `{ error: string, details?: any }`.
-
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/companies` | List with filters: `search`, `county`, `segment`, `status`, `minScore`, `hasWebsite`, `hasEmail`, `sort`, `page`, `limit` |
-| GET | `/api/companies/:id` | Full company detail + score breakdown + permits |
-| PATCH | `/api/companies/:id` | Update `status`, `doNotContact`, `notes` only |
-| POST | `/api/permits/sync` | Trigger permit ingest from all active sources |
-| GET | `/api/permits/signals` | Recent permits with matched company scores (dashboard widget) |
-| GET | `/api/jobs` | Paginated CrawlJob history, newest first |
-| POST | `/api/jobs/run` | Manually trigger a sync job |
-| POST | `/api/import/csv/preview` | Parse CSV → return preview (no DB write) |
-| POST | `/api/import/csv/commit` | Validate + persist → `{ created, updated, skipped, invalid, errors[] }` |
-| POST | `/api/enrich/company/:id` | Enrich one company from its website |
-| POST | `/api/enrich/batch` | Enrich batch: `{ companyIds[], limit? }` — max 10 |
-| GET | `/api/health` | Public health check → `{ status: "ok", db: "connected" }` |
-
----
-
-## License
-
-Apache 2.0 — see [LICENSE](./LICENSE)
+- **Cobb County permits:** No working adapter. Cobb is not registered in the Accela developer system under any known agency name variation.
+- **Forsyth / Jackson permits:** EnerGov REST API is accessible but doesn't return contractor names in search results, so permits can't be matched to companies. Not in active sources.
+- **Accela REST API (Gwinnett / Hall / Fulton):** Fully implemented. Returns empty results until each county authorizes the developer app in their Accela admin portal — no code changes needed on this side.
+- **Notes and tags on company detail:** Schema and models exist; the UI shows a "coming later" placeholder.
+- **Settings page:** Placeholder only. No configuration is persisted through it.
+- **Job queue:** Enrichment runs sequentially on demand. No background worker or distributed queue.
+- **Integration tests:** Unit tests cover scoring, normalization, dedupe, keyword classification, and API schema validation. No tests against a live database.
