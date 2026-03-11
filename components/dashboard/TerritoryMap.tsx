@@ -35,10 +35,10 @@ const MAP_STYLES: google.maps.MapTypeStyle[] = [
 ]
 
 function colorScale(count: number): string {
-  if (count === 0) return '#e5e7eb'
-  if (count < 5)  return '#bfdbfe'
-  if (count < 10) return '#60a5fa'
-  if (count < 20) return '#2563eb'
+  if (count === 0)  return '#e5e7eb'
+  if (count < 10)  return '#bfdbfe'
+  if (count < 25)  return '#60a5fa'
+  if (count < 50)  return '#2563eb'
   return '#1e3a8a'
 }
 
@@ -99,7 +99,7 @@ export function TerritoryMap() {
         map.data.setStyle((feature) => {
           const name = feature.getProperty('NAME') as string
           const countyData = data.get(name.toLowerCase())
-          const count = countyData?.uncontactedCount ?? 0
+          const count = countyData?.totalCompanies ?? 0
           const isPriority = PRIORITY_COUNTIES.has(name)
           return {
             fillColor: colorScale(count),
@@ -116,11 +116,18 @@ export function TerritoryMap() {
         const geoJson = await res.json() as object
         map.data.addGeoJson(geoJson)
 
-        // Hover tooltip
+        // Hover tooltip — show for all counties, even those with no companies yet
         map.data.addListener('mouseover', (e: google.maps.Data.MouseEvent) => {
           const name = e.feature.getProperty('NAME') as string
-          const countyData = data.get(name.toLowerCase())
-          if (!countyData || !e.domEvent) return
+          if (!e.domEvent) return
+          const countyData = data.get(name.toLowerCase()) ?? {
+            county: name,
+            totalCompanies: 0,
+            highScoreCount: 0,
+            uncontactedCount: 0,
+            avgScore: 0,
+            topLead: null,
+          }
           const evt = e.domEvent as MouseEvent
           setTooltip({ data: countyData, x: evt.clientX, y: evt.clientY })
           map.data.overrideStyle(e.feature, { fillOpacity: 0.95, strokeWeight: 2, strokeColor: '#374151' })
@@ -213,10 +220,10 @@ export function TerritoryMap() {
           <div className="flex items-center gap-3 text-[10px] text-gray-500">
             {[
               { color: '#e5e7eb', border: true, label: '0' },
-              { color: '#bfdbfe', label: '1–4' },
-              { color: '#60a5fa', label: '5–9' },
-              { color: '#2563eb', label: '10–19' },
-              { color: '#1e3a8a', label: '20+' },
+              { color: '#bfdbfe', label: '1–9' },
+              { color: '#60a5fa', label: '10–24' },
+              { color: '#2563eb', label: '25–49' },
+              { color: '#1e3a8a', label: '50+' },
             ].map(({ color, border, label }) => (
               <span key={label} className="flex items-center gap-1">
                 <span
@@ -226,7 +233,7 @@ export function TerritoryMap() {
                 {label}
               </span>
             ))}
-            <span className="text-gray-300">uncontacted 60+</span>
+            <span className="text-gray-300">companies</span>
           </div>
         </div>
 

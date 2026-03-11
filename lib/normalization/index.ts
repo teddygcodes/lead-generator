@@ -96,3 +96,6 @@ export function extractDomain(url: string | null | undefined): string {
     return normalizeDomain(url)
   }
 }
+
+export { deriveCountyFromCity } from './georgia-cities'
+export { geocodeCountyFromAddress } from './geocode-county'

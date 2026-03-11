@@ -3,7 +3,7 @@ import { auth } from '@clerk/nextjs/server'
 import { parse } from 'csv-parse/sync'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { normalizeName, normalizeDomain, normalizePhone, extractDomain } from '@/lib/normalization'
+import { normalizeName, normalizeDomain, normalizePhone, extractDomain, deriveCountyFromCity } from '@/lib/normalization'
 import { findExistingCompany, mergeCompanyData } from '@/lib/dedupe'
 import { ImportRowSchema } from '@/lib/validation/schemas'
 import { scoreCompany } from '@/lib/scoring'
@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
             city: row.city || undefined,
             state: row.state || undefined,
             zip: row.zip || undefined,
-            county: row.county || undefined,
+            county: row.county || deriveCountyFromCity(row.city, row.state) || undefined,
           },
         )
         plannedWrites.push({ type: 'update', companyId: existing.id, data: { ...merged, lastSeenAt: new Date() } })
@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
             city: row.city || undefined,
             state: row.state || 'GA',
             zip: row.zip || undefined,
-            county: row.county || undefined,
+            county: row.county || deriveCountyFromCity(row.city, row.state) || undefined,
             leadScore: score.leadScore,
             activeScore: score.activeScore,
             lastSeenAt: new Date(),
