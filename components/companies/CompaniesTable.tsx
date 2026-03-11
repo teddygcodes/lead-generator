@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { ScoreBadge, StatusBadge } from '@/components/ui/Badge'
 import { formatPhone } from '@/lib/format'
-import { BarChart2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Globe, Radio, RefreshCw, Trash2, X } from 'lucide-react'
+import { BarChart2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, GitMerge, Globe, Radio, RefreshCw, Trash2, X } from 'lucide-react'
 
 interface Company {
   id: string
@@ -62,6 +62,11 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteStatus, setDeleteStatus] = useState<string | null>(null)
+
+  // "Merge" state — only active when exactly 2 companies are selected
+  const [mergeConfirm, setMergeConfirm] = useState(false)
+  const [merging, setMerging] = useState(false)
+  const [mergeStatus, setMergeStatus] = useState<string | null>(null)
 
   // "Resync Scores" state — reruns scoring model on stored data, no enrichment
   const [rescoring, setRescoring] = useState(false)
@@ -242,6 +247,31 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
     }
   }
 
+  async function handleMerge(primaryId: string, secondaryId: string) {
+    setMerging(true)
+    setMergeStatus(null)
+    try {
+      const res = await fetch('/api/companies/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ primaryId, secondaryId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setMergeStatus(data.error ?? 'Merge failed')
+      } else {
+        setMergeStatus('Merged ✓')
+        setSelectedIds(new Set())
+        setMergeConfirm(false)
+        router.refresh()
+      }
+    } catch {
+      setMergeStatus('Network error')
+    } finally {
+      setMerging(false)
+    }
+  }
+
   return (
     <>
     <div className="card overflow-hidden">
@@ -253,7 +283,7 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
               <span className="font-medium text-blue-700">{selectedIds.size}</span>
               {' '}{selectedIds.size === 1 ? 'company' : 'companies'} selected
               <button
-                onClick={() => { setSelectedIds(new Set()); setEnrichStatus(null); setDeleteStatus(null); setConfirmDelete(false) }}
+                onClick={() => { setSelectedIds(new Set()); setEnrichStatus(null); setDeleteStatus(null); setConfirmDelete(false); setMergeConfirm(false); setMergeStatus(null) }}
                 className="ml-2 text-gray-400 hover:text-gray-600"
                 title="Clear selection"
               >
@@ -285,6 +315,11 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
               {deleteStatus}
             </span>
           )}
+          {mergeStatus && !merging && (
+            <span className={`text-xs ${mergeStatus === 'Merged ✓' ? 'text-green-600' : 'text-red-500'}`}>
+              {mergeStatus}
+            </span>
+          )}
           <button
             onClick={handleEnrichSelected}
             disabled={enriching || enrichingAll || deleting || selectedIds.size === 0}
@@ -312,6 +347,49 @@ export function CompaniesTable({ companies, pagination }: CompaniesTableProps) {
             <BarChart2 size={11} className={rescoring ? 'animate-pulse' : ''} />
             {rescoring ? 'Rescoring…' : 'Resync Scores'}
           </button>
+          {/* Merge — only visible when exactly 2 companies are selected */}
+          {selectedIds.size === 2 && (() => {
+            const [idA, idB] = [...selectedIds]
+            const compA = companies.find((c) => c.id === idA)
+            const compB = companies.find((c) => c.id === idB)
+            return mergeConfirm ? (
+              <>
+                <span className="text-xs text-blue-700 font-medium">Keep which?</span>
+                <button
+                  onClick={() => handleMerge(idA, idB)}
+                  disabled={merging}
+                  className="rounded px-2 py-1 text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 max-w-[140px] truncate"
+                  title={`Keep "${compA?.name ?? idA}"`}
+                >
+                  {merging ? '…' : `"${compA?.name ?? idA}"`}
+                </button>
+                <button
+                  onClick={() => handleMerge(idB, idA)}
+                  disabled={merging}
+                  className="rounded px-2 py-1 text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 max-w-[140px] truncate"
+                  title={`Keep "${compB?.name ?? idB}"`}
+                >
+                  {merging ? '…' : `"${compB?.name ?? idB}"`}
+                </button>
+                <button
+                  onClick={() => setMergeConfirm(false)}
+                  disabled={merging}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => { setMergeConfirm(true); setMergeStatus(null) }}
+                disabled={merging}
+                className="rounded px-2 py-1 text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 flex items-center gap-1"
+              >
+                <GitMerge size={11} />
+                Merge
+              </button>
+            )
+          })()}
           <div className="w-px h-4 bg-gray-200" />
           {confirmDelete ? (
             <>

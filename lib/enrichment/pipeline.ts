@@ -9,6 +9,7 @@ import { enrichCompany } from '@/lib/enrichment'
 import { enrichWithAI } from '@/lib/ai'
 import { scoreCompany } from '@/lib/scoring'
 import { findPlaceForCompany, isGooglePlacesConfigured, buildPlaceText } from '@/lib/sources/google-places'
+import { deriveCountyFromCity, geocodeCountyFromAddress } from '@/lib/normalization'
 
 export interface PipelineResult {
   success: boolean
@@ -30,7 +31,7 @@ export async function runFullEnrichment(companyId: string): Promise<PipelineResu
 async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, website: true, notes: true, phone: true, city: true, state: true },
+    select: { id: true, name: true, website: true, notes: true, phone: true, city: true, state: true, county: true, street: true, zip: true },
   })
 
   if (!company) return { success: false, error: 'Company not found' }
@@ -137,6 +138,22 @@ async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
       notes: !existingNotes && aiNotes ? aiNotes : undefined,
     },
   })
+
+  // Derive county from city for Georgia companies that still have none.
+  // Static lookup first; Geocoding API fallback for cities not in the map.
+  if (!company.county && company.city) {
+    const county =
+      deriveCountyFromCity(company.city, company.state) ??
+      (await geocodeCountyFromAddress({
+        city: company.city,
+        state: company.state,
+        street: company.street,
+        zip: company.zip,
+      }))
+    if (county) {
+      await db.company.update({ where: { id: companyId }, data: { county } })
+    }
+  }
 
   // Recompute score
   const updated = await db.company.findUnique({

@@ -12,7 +12,7 @@ import { fetchDekalbPermits } from '@/lib/permits/dekalb'
 import { fetchCherokeePermits } from '@/lib/permits/cherokee'
 import type { NormalizedPermit } from '@/lib/permits/base'
 import { scoreCompany } from '@/lib/scoring'
-import { normalizeName } from '@/lib/normalization'
+import { normalizeName, normalizePhone } from '@/lib/normalization'
 import { db } from '@/lib/db'
 
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ const ALL_SOURCES: SourceEntry[] = [
 const COUNTY_SOURCE_NAMES: Record<string, string[]> = {
   Gwinnett: ['ACCELA_GWINNETT', 'ACA_GWINNETT'],
   Hall:     ['ACCELA_HALLCO',   'ACA_HALLCO'],
-  Atlanta:  ['ACCELA_ATLANTA',  'ACA_ATLANTA'],
+  Fulton:   ['ACCELA_ATLANTA',  'ACA_ATLANTA'],  // Atlanta is a city in Fulton County
   DeKalb:   ['ARCGIS_DEKALB'],
   Cherokee: ['CHEROKEE_HTML'],
 }
@@ -103,21 +103,40 @@ function normalizeForMatch(name: string): string {
   }
 
   const full = strip(clean(name), [...LEGAL_SUFFIXES, ...DESCRIPTOR_SUFFIXES])
-  // If stripping was too aggressive, fall back to legal-suffix-only strip
-  return full.length >= 2 ? full : strip(clean(name), LEGAL_SUFFIXES)
+
+  // Fall back to legal-suffix-only strip if the result is too degraded to match reliably:
+  //   - ≤1 word total  → e.g. "Strada Services LLC"  → "strada"  (too generic)
+  //   - no word ≥2 chars → e.g. "T & D Electric Inc" → "t d"     (initials only, false-matches)
+  const fullWords = full.split(' ').filter(Boolean)
+  const hasSubstantiveWord = fullWords.some(w => w.length >= 2)
+  if (fullWords.length >= 2 && hasSubstantiveWord) return full
+  return strip(clean(name), LEGAL_SUFFIXES)
 }
 
 /**
  * Score the similarity between two pre-normalized names.
- * Returns 1.0 for exact match, 0.85 for contains, 0.75 for 3-word trigram overlap, 0 otherwise.
+ * Returns 1.0 for exact match, 0.85 for word-set containment, 0.75 for 3-word trigram overlap, 0 otherwise.
  * Returns 0 if either string is empty — prevents spurious matches when normalization over-strips.
+ *
+ * The containment check uses WORD-SET matching (not character substring) to prevent short tokens
+ * like "ces" from matching inside "servi-ces" at the character level.
+ * e.g. "smith electrical" ⊆ {"smith","electrical","services"} → 0.85  ✓
+ *      "ces"              ⊄ {"brown","electrical","services"}  → 0      ✓
  */
 function matchScore(a: string, b: string): number {
   if (!a || !b) return 0
   if (a === b) return 1.0
-  if (a.includes(b) || b.includes(a)) return 0.85
+
+  // Word-set containment: all words of one name must exist (as whole words) in the other
   const wordsA = a.split(' ').filter(Boolean)
   const wordsB = b.split(' ').filter(Boolean)
+  const setA = new Set(wordsA)
+  const setB = new Set(wordsB)
+  const bInA = wordsB.every(w => setA.has(w))
+  const aInB = wordsA.every(w => setB.has(w))
+  if (bInA || aInB) return 0.85
+
+  // 3-word trigram overlap (word-joined trigrams, character-compared against joined target)
   const joinedB = wordsB.join(' ')
   for (let i = 0; i <= wordsA.length - 3; i++) {
     const trigram = wordsA.slice(i, i + 3).join(' ')
@@ -180,6 +199,70 @@ function computePermitSignalScore(
 
   // Cap at 30 before scoreCompany() applies its own maxScore cap
   return Math.min(score, 30)
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper: update one company's permit-derived fields and rescore
+// ---------------------------------------------------------------------------
+
+export async function updateCompanyPermitStats(companyId: string): Promise<string | null> {
+  try {
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+    const permits = await db.permit.findMany({
+      where: { companyId },
+      select: { filedAt: true, status: true, jobValue: true, estimatedValueBucket: true },
+    })
+    if (permits.length === 0) return null
+
+    const lastPermitAt = permits.reduce(
+      (max, p) => (p.filedAt > max ? p.filedAt : max),
+      permits[0].filedAt,
+    )
+    const permitCount30Days = permits.filter((p) => p.filedAt >= thirtyDaysAgo).length
+    const activeJobCount = permits.filter((p) =>
+      ['ISSUED', 'INSPECTED'].includes(p.status),
+    ).length
+    const permitSignalScore = computePermitSignalScore(permits, permitCount30Days, activeJobCount)
+
+    const company = await db.company.findUnique({
+      where: { id: companyId },
+      include: { signals: true, contacts: true },
+    })
+    if (!company) return null
+
+    const score = scoreCompany({
+      county: company.county,
+      state: company.state,
+      segments: company.segments,
+      specialties: company.specialties,
+      description: company.description,
+      website: company.website,
+      email: company.email,
+      phone: company.phone,
+      street: company.street,
+      sourceConfidence: company.sourceConfidence,
+      signals: company.signals,
+      contacts: company.contacts,
+      permitSignalScore,
+    })
+
+    await db.company.update({
+      where: { id: companyId },
+      data: {
+        lastPermitAt,
+        permitCount30Days,
+        activeJobCount,
+        permitSignalScore,
+        leadScore: score.leadScore,
+        activeScore: score.activeScore,
+      },
+    })
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -365,16 +448,17 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
   const affectedCompanyIds = new Set<string>()
 
   if (newPermitRecords.length > 0) {
-    // Load all companies once for matching
+    // Load all companies once for matching (include phone for veto logic)
     const companies = await db.company.findMany({
-      select: { id: true, name: true, normalizedName: true },
+      select: { id: true, name: true, normalizedName: true, phone: true },
     })
 
-    // Fix 4: pre-compute normalizedName for every company before the inner loop
+    // Pre-compute normalizedName for every company before the inner loop
     const normalizedCompanies = companies.map((c) => ({
       id: c.id,
       name: c.name,
       normalizedName: normalizeForMatch(c.name),
+      phone: c.phone ?? null,
     }))
 
     console.log(`[sync-permits] Matching ${newPermitRecords.length} new permits against ${companies.length} companies…`)
@@ -384,7 +468,7 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
 
       const normalizedContractor = normalizeForMatch(record.contractorName)
 
-      // Find best match — iterate pre-computed normalizedCompanies (Fix 4)
+      // Find best match — iterate pre-computed normalizedCompanies
       let bestScore = 0
       let bestCompanyId: string | null = null
 
@@ -396,8 +480,21 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
         }
       }
 
-      if (bestScore >= 0.75 && bestCompanyId !== null) {
-        // Fix 1: wrap the permit.update for matched company in a per-permit try/catch
+      // Phone veto: if score is sub-1.0 and both sides have a phone that differs,
+      // the permit belongs to a different company — reject the match.
+      // Uses normalizePhone() so "(770) 555-1234" and "7705551234" compare equal.
+      if (bestScore >= 0.85 && bestScore < 1.0 && bestCompanyId !== null && record.contractorPhone) {
+        const permPhone = normalizePhone(record.contractorPhone)
+        const matchedCo = normalizedCompanies.find((nc) => nc.id === bestCompanyId)
+        const coPhone = normalizePhone(matchedCo?.phone ?? '')
+        if (permPhone && coPhone && permPhone !== coPhone) {
+          bestScore = 0
+          bestCompanyId = null
+        }
+      }
+
+      if (bestScore >= 0.85 && bestCompanyId !== null) {
+        // Wrap in per-permit try/catch
         try {
           await db.permit.update({
             where: { id: record.id },
@@ -449,6 +546,7 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
               id: newCompany.id,
               name: newCompany.name,
               normalizedName: normalizeForMatch(newCompany.name),
+              phone: newCompany.phone ?? null,
             })
 
             affectedCompanyIds.add(newCompany.id)
@@ -478,76 +576,8 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
   console.log(`[sync-permits] Updating permit fields for ${affectedIds.length} affected companies…`)
 
   for (const companyId of affectedIds) {
-    try {
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-
-      // Query 1 of 3: get all permits for this company (needed for scoring)
-      const permits = await db.permit.findMany({
-        where: { companyId },
-        select: {
-          filedAt: true,
-          status: true,
-          jobValue: true,
-          estimatedValueBucket: true,
-        },
-      })
-
-      if (permits.length === 0) continue
-
-      const lastPermitAt = permits.reduce(
-        (max, p) => (p.filedAt > max ? p.filedAt : max),
-        permits[0].filedAt,
-      )
-      const permitCount30Days = permits.filter((p) => p.filedAt >= thirtyDaysAgo).length
-      const activeJobCount = permits.filter((p) =>
-        ['ISSUED', 'INSPECTED'].includes(p.status),
-      ).length
-
-      // Compute permitSignalScore locally — do NOT write it yet
-      const permitSignalScore = computePermitSignalScore(permits, permitCount30Days, activeJobCount)
-
-      // Query 2 of 3: fetch company + relations needed by scoreCompany
-      const company = await db.company.findUnique({
-        where: { id: companyId },
-        include: { signals: true, contacts: true },
-      })
-
-      if (!company) continue
-
-      // Score using the freshly computed permitSignalScore
-      const score = scoreCompany({
-        county: company.county,
-        state: company.state,
-        segments: company.segments,
-        specialties: company.specialties,
-        description: company.description,
-        website: company.website,
-        email: company.email,
-        phone: company.phone,
-        street: company.street,
-        sourceConfidence: company.sourceConfidence,
-        signals: company.signals,
-        contacts: company.contacts,
-        permitSignalScore,
-      })
-
-      // Query 3 of 3: single update with all fields at once
-      await db.company.update({
-        where: { id: companyId },
-        data: {
-          lastPermitAt,
-          permitCount30Days,
-          activeJobCount,
-          permitSignalScore,
-          leadScore: score.leadScore,
-          activeScore: score.activeScore,
-        },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      errors.push(`Company update failed for companyId=${companyId}: ${message}`)
-    }
+    const err = await updateCompanyPermitStats(companyId)
+    if (err) errors.push(`Company update failed for companyId=${companyId}: ${err}`)
   }
 
   // -------------------------------------------------------------------------
@@ -568,4 +598,142 @@ export async function syncPermits(county?: string): Promise<SyncSummary> {
   console.log('[sync-permits] Sync complete:', summary)
 
   return summary
+}
+
+// ---------------------------------------------------------------------------
+// rematchPermits — clear and re-run company matching for all permits in a
+// county using the current (fixed) normalizeForMatch logic.
+// Use this to repair bad matches created by older versions of the algorithm.
+// ---------------------------------------------------------------------------
+
+export interface RematchSummary {
+  county: string
+  cleared: number
+  matched: number
+  newCompaniesCreated: number
+  errors: string[]
+}
+
+export async function rematchPermits(county: string): Promise<RematchSummary> {
+  const errors: string[] = []
+
+  // Step 1 — Load every permit for this county
+  const permits = await db.permit.findMany({
+    where: { county },
+    select: { id: true, contractorName: true, contractorPhone: true },
+  })
+  console.log(`[rematch-permits] ${county}: ${permits.length} permits to re-match`)
+
+  // Step 2 — Clear all existing company links for this county
+  const { count: cleared } = await db.permit.updateMany({
+    where: { county },
+    data: { companyId: null, matchConfidence: null, matchedAt: null },
+  })
+  console.log(`[rematch-permits] ${county}: cleared ${cleared} existing matches`)
+
+  // Step 3 — Load all companies and pre-compute normalized names (include phone for veto)
+  const companies = await db.company.findMany({
+    select: { id: true, name: true, phone: true },
+  })
+  const normalizedCompanies = companies.map((c) => ({
+    id: c.id,
+    name: c.name,
+    normalizedName: normalizeForMatch(c.name),
+    phone: c.phone ?? null,
+  }))
+
+  let matched = 0
+  let newCompaniesCreated = 0
+  const affectedCompanyIds = new Set<string>()
+
+  for (const record of permits) {
+    if (!record.contractorName) continue
+
+    const normalizedContractor = normalizeForMatch(record.contractorName)
+
+    let bestScore = 0
+    let bestCompanyId: string | null = null
+
+    for (const nc of normalizedCompanies) {
+      const score = matchScore(normalizedContractor, nc.normalizedName)
+      if (score > bestScore) {
+        bestScore = score
+        bestCompanyId = nc.id
+      }
+    }
+
+    // Phone veto: if score is sub-1.0 and both sides have a phone that differs,
+    // the permit belongs to a different company — reject the match.
+    if (bestScore >= 0.85 && bestScore < 1.0 && bestCompanyId !== null && record.contractorPhone) {
+      const permPhone = normalizePhone(record.contractorPhone)
+      const matchedCo = normalizedCompanies.find((nc) => nc.id === bestCompanyId)
+      const coPhone = normalizePhone(matchedCo?.phone ?? '')
+      if (permPhone && coPhone && permPhone !== coPhone) {
+        bestScore = 0
+        bestCompanyId = null
+      }
+    }
+
+    if (bestScore >= 0.85 && bestCompanyId !== null) {
+      try {
+        await db.permit.update({
+          where: { id: record.id },
+          data: { companyId: bestCompanyId, matchConfidence: bestScore, matchedAt: new Date() },
+        })
+        affectedCompanyIds.add(bestCompanyId)
+        matched++
+      } catch (err) {
+        errors.push(`Match update failed for permit ${record.id}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    } else {
+      // No match — create a new company if name has a qualifying keyword
+      const hasQualifyingKeyword = QUALIFYING_KEYWORDS.some((kw) =>
+        record.contractorName!.toLowerCase().includes(kw.toLowerCase()),
+      )
+      if (hasQualifyingKeyword) {
+        try {
+          const newCompany = await db.company.create({
+            data: {
+              name: record.contractorName!,
+              normalizedName: normalizeName(record.contractorName),
+              county,
+              state: 'GA',
+              phone: record.contractorPhone ?? undefined,
+              recordOrigin: 'PERMIT_DISCOVERY',
+              leadScore: 20,
+              status: 'NEW',
+            },
+          })
+          await db.permit.update({
+            where: { id: record.id },
+            data: { companyId: newCompany.id, matchConfidence: 1.0, matchedAt: new Date() },
+          })
+          // Add to in-memory list so later permits in this run can match it
+          normalizedCompanies.push({
+            id: newCompany.id,
+            name: newCompany.name,
+            normalizedName: normalizeForMatch(newCompany.name),
+            phone: newCompany.phone ?? null,
+          })
+          affectedCompanyIds.add(newCompany.id)
+          newCompaniesCreated++
+          matched++
+        } catch (err) {
+          errors.push(`Company create failed for "${record.contractorName}": ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }
+  }
+
+  // Step 4 — Rescore all affected companies
+  console.log(`[rematch-permits] ${county}: rescoring ${affectedCompanyIds.size} companies…`)
+  for (const companyId of affectedCompanyIds) {
+    const err = await updateCompanyPermitStats(companyId)
+    if (err) errors.push(`Score update failed for companyId=${companyId}: ${err}`)
+  }
+
+  console.log(
+    `[rematch-permits] ${county}: matched=${matched}, newCompanies=${newCompaniesCreated}, errors=${errors.length}`,
+  )
+  return { county, cleared, matched, newCompaniesCreated, errors }
 }

@@ -39,7 +39,7 @@ interface AcaAgencyConfig {
 const ACA_AGENCY_CONFIG: Record<AcaAgencyCode, AcaAgencyConfig> = {
   ATLANTA_GA: {
     source:           'ACA_ATLANTA',
-    county:           'Atlanta',
+    county:           'Fulton',   // Atlanta is a city in Fulton County
     module:           'Building',
     permitTypeLabels: ['Commercial - Electrical', 'Residential - Electrical'],
   },
@@ -580,14 +580,49 @@ function parseListRows(html: string, agencyCode: string, module: string): ListRo
   return results
 }
 
-/** Extract the __doPostBack target from the "Next >" pagination link. */
-function extractNextTarget(html: string): string | null {
+/** Extract the __doPostBack target from the "Next >" pagination link.
+ *
+ * Also walks up the element tree to find the ASP.NET UpdatePanel that owns the pager
+ * control.  This panel name must be used in the ctl00$ScriptManager1 field of the
+ * pagination POST — if we reference the wrong panel the server silently ignores the
+ * async trigger and returns a full-page response with no grid rows.
+ *
+ * ACA portals vary in whether they use single or double quotes in __doPostBack calls.
+ * node-html-parser decodes HTML entities in attribute values, so &quot; → " —
+ * the regex must accept both quote styles.
+ */
+interface NextPageInfo {
+  target:    string   // __doPostBack target for the "Next >" link
+  panelName: string   // UpdatePanel ID in ctl00$... dollar notation; empty if not found
+}
+
+function extractNextTarget(html: string): NextPageInfo | null {
   const root = parseHtml(html)
   for (const a of root.querySelectorAll('a')) {
-    if (a.text.trim() === 'Next >') {
+    const text = a.text.trim()
+    // Match "Next >" or "Next>" (some portals omit the space)
+    if (text === 'Next >' || text === 'Next>') {
       const href = a.getAttribute('href') ?? ''
-      const m    = href.match(/__doPostBack\('([^']+)'/)
-      if (m) return m[1]
+      // Accept single-quoted: __doPostBack('target','') or double-quoted: __doPostBack("target","")
+      const m = href.match(/__doPostBack\(['"]([^'"]+)['"]/)
+      if (!m) continue
+
+      // Walk up the element tree to find the closest ancestor whose id contains "updatePanel".
+      // On page 1 the full outer HTML is available so the wrapper div is present.
+      // On page 2+ (UpdatePanel response) only the inner HTML is returned — in that case
+      // panelName will be empty and the caller falls back to the last known panel name.
+      let panelName = ''
+      let el: NHtmlElement | null = a.parentNode as NHtmlElement | null
+      while (el) {
+        const id = (el as NHtmlElement).getAttribute?.('id') ?? ''
+        if (id && /updatepanel/i.test(id)) {
+          panelName = id.replace(/_/g, '$')
+          break
+        }
+        el = el.parentNode as NHtmlElement | null
+      }
+
+      return { target: m[1], panelName }
     }
   }
   return null
@@ -721,17 +756,19 @@ async function fetchAllPagesForType(
   // Fall back to the text label if no mapping found (defensive).
   const permitTypeValue = state.permitTypeValues[permitType] ?? permitType
 
-  // Use the page's pre-filled date values for the actual POST.
-  // Sending our custom dates against a fresh-GET VIEWSTATE triggers ASP.NET's
-  // "String was not recognized as a valid DateTime" error because VIEWSTATE stores
-  // the form's default values and rejects a mismatch on the server side.
-  // We use the page defaults for the request and filter rows by our window afterwards.
-  const postStartDate = state.defaultStartDate || filterStartDate
-  const postEndDate   = state.defaultEndDate   || filterEndDate
+  // Prefer our custom 30-day filter window.  For portals that expose date inputs
+  // (hasDates), we send filterStartDate/filterEndDate directly.  If the server
+  // rejects them with a pageRedirect/Error (e.g. ASP.NET DateTime validation),
+  // we automatically retry with the portal's own default dates (narrower window)
+  // so we always get at least some results.
+  // For portals without date inputs (e.g. GWINNETT), we skip date fields entirely
+  // and apply filtering client-side.
   const hasDates      = !!state.startDateFieldName && !!state.endDateFieldName
+  const postStartDate = hasDates ? filterStartDate : ''
+  const postEndDate   = hasDates ? filterEndDate   : ''
   console.log(
     `[accela-aca] ${agencyCode}/${permitType}: posting with dates ${hasDates ? `${postStartDate} → ${postEndDate}` : '(no date filter — portal does not support it)'}`,
-    `(filter window: ${filterStartDate} → ${filterEndDate})`,
+    `(portal defaults: ${state.defaultStartDate || 'none'} → ${state.defaultEndDate || 'none'})`,
   )
 
   // Build per-search extra fields; include date fields only if the portal has them.
@@ -750,11 +787,28 @@ async function fetchAllPagesForType(
   }
 
   // Initial search POST — async UpdatePanel request (btnNewSearch is an async trigger)
-  const searchResult = await postCapHome(agencyCode, module, state, searchExtraFields, true)
+  let searchResult = await postCapHome(agencyCode, module, state, searchExtraFields, true)
 
   if (!searchResult) return []
 
-  // Check for UpdatePanel redirect (DateTime / other server error)
+  // If the server rejected our custom dates (ASP.NET DateTime validation error),
+  // retry with the portal's own default dates.  This gives a narrower window
+  // but guarantees at least some results rather than zero.
+  if (hasDates && (/pageRedirect/.test(searchResult.html) || /Error\.aspx/i.test(searchResult.html))) {
+    const fallbackStart = state.defaultStartDate || filterStartDate
+    const fallbackEnd   = state.defaultEndDate   || filterEndDate
+    console.warn(
+      `[accela-aca] ${agencyCode}/${permitType}: custom dates caused server error — retrying with portal defaults (${fallbackStart} → ${fallbackEnd})`,
+    )
+    const retryFields = {
+      ...searchExtraFields,
+      [state.startDateFieldName]: fallbackStart,
+      [state.endDateFieldName]:   fallbackEnd,
+    }
+    searchResult = await postCapHome(agencyCode, module, state, retryFields, true) ?? searchResult
+  }
+
+  // If still an error after retry, skip this type
   if (/pageRedirect/.test(searchResult.html) || /Error\.aspx/i.test(searchResult.html)) {
     console.warn(`[accela-aca] ${agencyCode}/${permitType}: server returned error/redirect — skipping type`)
     console.warn(`[accela-aca] ${agencyCode}/${permitType}: response snippet: ${searchResult.html.slice(0, 200)}`)
@@ -775,6 +829,11 @@ async function fetchAllPagesForType(
   const allRows: ListRow[] = []
   let   currentHtml = searchResult.html
   let   page        = 1
+
+  // The panel that owns the pager is detected from the "Next >" link's UpdatePanel ancestor
+  // on the first page (where the wrapper div is present in the HTML).  We cache it here and
+  // reuse for page 2+ because UpdatePanel responses only return inner HTML (no wrapper div).
+  let paginationPanelName = resultsPanelName
 
   while (page <= MAX_PAGES) {
     const rows = parseListRows(currentHtml, agencyCode, module)
@@ -805,16 +864,23 @@ async function fetchAllPagesForType(
       break
     }
 
-    const nextTarget = extractNextTarget(currentHtml)
-    if (!nextTarget) break  // no more pages
+    const nextInfo = extractNextTarget(currentHtml)
+    if (!nextInfo) break  // no more pages
+
+    // Latch the pagination panel from the first time we find the "Next >" link.
+    // On page 1, the full outer HTML contains the UpdatePanel wrapper div so we can detect it.
+    // On page 2+, the server returns only the panel's inner HTML so panelName will be empty —
+    // in that case we keep using the panel we found on page 1.
+    if (nextInfo.panelName) paginationPanelName = nextInfo.panelName
 
     // Build pagination extra fields; include date and search-type fields as applicable.
-    // ScriptManager1 must reference the SAME panel that contains the paginator control
-    // (resultsPanelName, detected from the search response), not always "updatePanel".
+    // ctl00$ScriptManager1 MUST reference the panel that owns the pager control, NOT the
+    // outer search panel — sending the wrong panel name causes the server to discard the
+    // async trigger and return a full-page (or empty) response.
     const pageExtraFields: Record<string, string> = {
-      __EVENTTARGET:               nextTarget,
+      __EVENTTARGET:               nextInfo.target,
       [state.permitTypeFieldName]: permitTypeValue,
-      'ctl00$ScriptManager1':      `${resultsPanelName}|${nextTarget}`,
+      'ctl00$ScriptManager1':      `${paginationPanelName}|${nextInfo.target}`,
     }
     if (hasDates) {
       pageExtraFields[state.startDateFieldName] = postStartDate

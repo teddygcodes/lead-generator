@@ -115,6 +115,18 @@ export const PermitBulkSyncSchema = z.object({
 
 export type PermitBulkSync = z.infer<typeof PermitBulkSyncSchema>
 
+// ---- Merge two companies ----
+export const MergeCompaniesSchema = z
+  .object({
+    primaryId: z.string().min(1),
+    secondaryId: z.string().min(1),
+  })
+  .refine((d) => d.primaryId !== d.secondaryId, {
+    message: 'Cannot merge a company with itself',
+  })
+
+export type MergeCompanies = z.infer<typeof MergeCompaniesSchema>
+
 // ---- Company create (from permit or other quick-create flows) ----
 export const CompanyCreateSchema = z.object({
   name: z.string().min(1),

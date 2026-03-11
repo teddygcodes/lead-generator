@@ -84,6 +84,8 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
   const [selectedPermitId, setSelectedPermitId] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [rematching, setRematching] = useState(false)
+  const [rematchMsg, setRematchMsg] = useState<string | null>(null)
 
   // Debounce timer ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -182,6 +184,33 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
     }
   }
 
+  async function handleRematch() {
+    if (!selectedCounty || rematching) return
+    setRematching(true)
+    setRematchMsg(null)
+    try {
+      const res = await fetch('/api/permits/rematch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ county: selectedCounty }),
+      })
+      const data = await res.json() as { matched?: number; cleared?: number; newCompaniesCreated?: number; error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Unknown error')
+      setRematchMsg(`Re-matched ${data.matched ?? 0} of ${data.cleared ?? 0} permits ✓`)
+      setTimeout(() => {
+        setRematchMsg(null)
+        void loadPermits(selectedCounty, 1, search)
+        setPage(1)
+      }, 3000)
+    } catch (err) {
+      console.error('[PermitsBrowser] rematch failed:', err)
+      setRematchMsg('Re-match failed')
+      setTimeout(() => setRematchMsg(null), 3000)
+    } finally {
+      setRematching(false)
+    }
+  }
+
   const pageStart = (page - 1) * 50 + 1
   const pageEnd = Math.min(page * 50, total)
 
@@ -264,12 +293,26 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
+                {rematchMsg && (
+                  <span className={`text-xs font-medium ${rematchMsg.includes('failed') ? 'text-red-600' : 'text-green-600'}`}>{rematchMsg}</span>
+                )}
                 {syncMsg && (
                   <span className="text-xs font-medium text-green-600">{syncMsg}</span>
                 )}
                 <button
+                  onClick={() => void handleRematch()}
+                  disabled={rematching || syncing}
+                  title="Clear all company links for this county and re-run matching with the current algorithm"
+                  className="flex items-center gap-1.5 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 shadow-sm hover:bg-amber-100 hover:border-amber-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {rematching
+                    ? <><Loader2 size={12} className="animate-spin" /> Re-matching…</>
+                    : <><RefreshCw size={12} /> Re-match</>
+                  }
+                </button>
+                <button
                   onClick={() => void handleBulkSync()}
-                  disabled={syncing}
+                  disabled={syncing || rematching}
                   title="Link unlinked permits whose contractor name already has a match in this county"
                   className="flex items-center gap-1.5 rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
@@ -308,7 +351,8 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
             ) : (
               <>
                 <div className="card overflow-hidden p-0">
-                  <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[860px] text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 bg-gray-50/80">
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contractor</th>
@@ -389,6 +433,7 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
                       ))}
                     </tbody>
                   </table>
+                </div>{/* overflow-x-auto */}
                 </div>
 
                 {/* Pagination */}
