@@ -8,6 +8,8 @@
 
 import { accelaAdapter } from '@/lib/permits/accela'
 import { accelaAcaAdapter } from '@/lib/permits/accela-aca'
+import { fetchDekalbPermits } from '@/lib/permits/dekalb'
+import { fetchCherokeePermits } from '@/lib/permits/cherokee'
 import type { NormalizedPermit } from '@/lib/permits/base'
 import { scoreCompany } from '@/lib/scoring'
 import { normalizeName } from '@/lib/normalization'
@@ -29,20 +31,35 @@ export interface SyncSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Source name constants (matches order of Promise.allSettled results)
+// Source registry — all permit data sources with their county groupings
 // ---------------------------------------------------------------------------
 
-const SOURCE_NAMES = [
-  'ACCELA_GWINNETT',   // REST API (inactive — returns [] until county authorizes our app)
-  'ACCELA_HALLCO',
-  'ACCELA_ATLANTA',
-  'ACA_ATLANTA',       // HTML scraper via ACA citizen portal (active)
-  'ACA_GWINNETT',
-  'ACA_HALLCO',
+type SourceEntry = { name: string; fetch: () => Promise<NormalizedPermit[]> }
+
+const ALL_SOURCES: SourceEntry[] = [
+  { name: 'ACCELA_GWINNETT', fetch: () => accelaAdapter('GWINNETT_COUNTY') },  // REST API (inactive — returns [] until county authorizes our app)
+  { name: 'ACCELA_HALLCO',   fetch: () => accelaAdapter('HALL_COUNTY') },
+  { name: 'ACCELA_ATLANTA',  fetch: () => accelaAdapter('ATLANTA_GA') },
+  { name: 'ACA_ATLANTA',     fetch: () => accelaAcaAdapter('ATLANTA_GA') },     // HTML scraper via ACA citizen portal (active)
+  { name: 'ACA_GWINNETT',    fetch: () => accelaAcaAdapter('GWINNETT') },
+  { name: 'ACA_HALLCO',      fetch: () => accelaAcaAdapter('HALLCO') },
+  { name: 'ARCGIS_DEKALB',   fetch: () => fetchDekalbPermits() },               // ArcGIS FeatureServer REST API (public, no auth required)
+  { name: 'CHEROKEE_HTML',   fetch: () => fetchCherokeePermits() },             // Cherokee County PHP portal HTML scraper
   // EnerGov (Forsyth, Jackson) removed — API returns no contractor name so permits
   // can never be matched to companies or affect scoring. Re-add if contractor detail
   // endpoint becomes available.
-] as const
+]
+
+const COUNTY_SOURCE_NAMES: Record<string, string[]> = {
+  Gwinnett: ['ACCELA_GWINNETT', 'ACA_GWINNETT'],
+  Hall:     ['ACCELA_HALLCO',   'ACA_HALLCO'],
+  Atlanta:  ['ACCELA_ATLANTA',  'ACA_ATLANTA'],
+  DeKalb:   ['ARCGIS_DEKALB'],
+  Cherokee: ['CHEROKEE_HTML'],
+}
+
+/** Valid county values accepted by the sync API route. */
+export const VALID_COUNTIES = Object.keys(COUNTY_SOURCE_NAMES)
 
 // ---------------------------------------------------------------------------
 // Keywords used to qualify new-company creation from unmatched permits
@@ -69,26 +86,34 @@ const QUALIFYING_KEYWORDS = [
 
 /**
  * Normalize a company name for fuzzy matching.
- * Strips business-type suffixes and cleans whitespace.
+ * Strips legal suffixes (LLC, Inc) and common descriptor words (Electric, Power, etc.).
+ * Falls back to legal-suffix-only stripping if full stripping yields fewer than 2 characters,
+ * preventing names like "Power Solutions Group" from collapsing to "" and matching everything.
  */
 function normalizeForMatch(name: string): string {
-  const STRIP_SUFFIXES = [
-    'llc', 'inc', 'corp', 'co', 'ltd', 'electric', 'electrical',
-    'power', 'systems', 'services', 'solutions', 'contractors', 'group',
+  const LEGAL_SUFFIXES = ['llc', 'inc', 'corp', 'co', 'ltd']
+  const DESCRIPTOR_SUFFIXES = [
+    'electric', 'electrical', 'power', 'systems', 'services',
+    'solutions', 'contractors', 'group',
   ]
-  let n = name.toLowerCase()
-  n = n.replace(/[^a-z0-9 ]/g, ' ')
-  for (const suffix of STRIP_SUFFIXES) {
-    n = n.replace(new RegExp(`\\b${suffix}\\b`, 'g'), '')
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
+  const strip = (s: string, words: string[]) => {
+    for (const w of words) s = s.replace(new RegExp(`\\b${w}\\b`, 'g'), '')
+    return s.replace(/\s+/g, ' ').trim()
   }
-  return n.replace(/\s+/g, ' ').trim()
+
+  const full = strip(clean(name), [...LEGAL_SUFFIXES, ...DESCRIPTOR_SUFFIXES])
+  // If stripping was too aggressive, fall back to legal-suffix-only strip
+  return full.length >= 2 ? full : strip(clean(name), LEGAL_SUFFIXES)
 }
 
 /**
  * Score the similarity between two pre-normalized names.
  * Returns 1.0 for exact match, 0.85 for contains, 0.75 for 3-word trigram overlap, 0 otherwise.
+ * Returns 0 if either string is empty — prevents spurious matches when normalization over-strips.
  */
 function matchScore(a: string, b: string): number {
+  if (!a || !b) return 0
   if (a === b) return 1.0
   if (a.includes(b) || b.includes(a)) return 0.85
   const wordsA = a.split(' ').filter(Boolean)
@@ -161,30 +186,31 @@ function computePermitSignalScore(
 // Main export
 // ---------------------------------------------------------------------------
 
-export async function syncPermits(): Promise<SyncSummary> {
+export async function syncPermits(county?: string): Promise<SyncSummary> {
   const errors: string[] = []
 
   // -------------------------------------------------------------------------
-  // STEP 1 — Parallel fetch from all active sources
+  // STEP 1 — Parallel fetch from selected sources
   // -------------------------------------------------------------------------
 
-  console.log('[sync-permits] Starting parallel fetch from all sources…')
+  const sources = county
+    ? ALL_SOURCES.filter(s => COUNTY_SOURCE_NAMES[county]?.includes(s.name))
+    : ALL_SOURCES
 
-  const results = await Promise.allSettled([
-    accelaAdapter('GWINNETT_COUNTY'),     // REST API (inactive — returns [])
-    accelaAdapter('HALL_COUNTY'),
-    accelaAdapter('ATLANTA_GA'),
-    accelaAcaAdapter('ATLANTA_GA'),       // HTML scraper (active)
-    accelaAcaAdapter('GWINNETT'),
-    accelaAcaAdapter('HALLCO'),
-  ])
+  console.log(
+    county
+      ? `[sync-permits] Starting fetch for ${county} (${sources.map(s => s.name).join(', ')})…`
+      : '[sync-permits] Starting parallel fetch from all sources…',
+  )
+
+  const results = await Promise.allSettled(sources.map(s => s.fetch()))
 
   const sourceSummaries: SyncSummary['sources'] = []
   const allPermits: NormalizedPermit[] = []
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
-    const name = SOURCE_NAMES[i]
+    const name = sources[i].name
 
     if (result.status === 'fulfilled') {
       const permits = result.value
@@ -207,7 +233,7 @@ export async function syncPermits(): Promise<SyncSummary> {
   // Both the REST API adapter (accela.ts) and the ACA scraper (accela-aca.ts)
   // may eventually return data for the same permits. Deduplicate by permitNumber
   // before upserting so we never create two DB rows for the same physical permit.
-  // Keep the first occurrence (earlier sources in SOURCE_NAMES order win).
+  // Keep the first occurrence (earlier sources in ALL_SOURCES order win).
   // -------------------------------------------------------------------------
 
   const seenPermitNumbers = new Set<string>()

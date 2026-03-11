@@ -89,6 +89,8 @@ model Company {
   permitCount30Days    Int           @default(0)
   activeJobCount       Int           @default(0)
   permitSignalScore    Int           @default(0)
+  googlePlaceId        String?       @unique
+  googleRating         Float?
   recordOrigin         RecordOrigin  @default(DEMO)
 
   signals   Signal[]

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { NavLink } from './NavLink'
 import { UserButton } from '@clerk/nextjs'
-import { LayoutDashboard, Building2, Briefcase, Upload, Settings, Zap } from 'lucide-react'
+import { LayoutDashboard, Building2, Briefcase, Upload, Settings, Zap, Search, FileText } from 'lucide-react'
 
 export function Sidebar() {
   return (
@@ -24,6 +24,12 @@ export function Sidebar() {
         </NavLink>
         <NavLink href="/jobs" icon={<Briefcase size={15} />}>
           Jobs
+        </NavLink>
+        <NavLink href="/permits" icon={<FileText size={15} />}>
+          Permits
+        </NavLink>
+        <NavLink href="/prospecting" icon={<Search size={15} />}>
+          Prospecting
         </NavLink>
         <NavLink href="/import" icon={<Upload size={15} />}>
           Import

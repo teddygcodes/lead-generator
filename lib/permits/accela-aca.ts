@@ -39,7 +39,7 @@ interface AcaAgencyConfig {
 const ACA_AGENCY_CONFIG: Record<AcaAgencyCode, AcaAgencyConfig> = {
   ATLANTA_GA: {
     source:           'ACA_ATLANTA',
-    county:           'Fulton',
+    county:           'Atlanta',
     module:           'Building',
     permitTypeLabels: ['Commercial - Electrical', 'Residential - Electrical'],
   },

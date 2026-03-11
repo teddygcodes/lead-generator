@@ -42,3 +42,8 @@ next-env.d.ts
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# macOS duplicate files (Finder copies named "file 2.ts" etc.) — kept locally, not committed
+*[[:space:]]2.ts
+*[[:space:]]2.tsx
+*[[:space:]]2.js

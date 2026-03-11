@@ -38,6 +38,7 @@ export const CompanyPatchSchema = z.object({
   status: z.enum(['NEW', 'QUALIFYING', 'ACTIVE', 'INACTIVE', 'DO_NOT_CONTACT']).optional(),
   doNotContact: z.boolean().optional(),
   notes: z.string().max(5000).optional(),
+  website: z.string().url().nullable().optional(),
 })
 
 export type CompanyPatch = z.infer<typeof CompanyPatchSchema>
@@ -83,3 +84,45 @@ export const RunJobSchema = z.object({
   sourceType: z.enum(['COMPANY_WEBSITE', 'PERMIT', 'LICENSE', 'COMPANY_DISCOVERY']),
   params: z.record(z.unknown()).optional(),
 })
+
+// ---- Google Places prospecting ----
+export const PlaceAddItemSchema = z.object({
+  placeId: z.string().min(1),
+  name: z.string().min(1),
+  phone: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  rating: z.number().nullable().optional(),
+  website: z.string().nullable().optional(),
+})
+
+export const PlacesAddSchema = z.object({
+  places: z.array(PlaceAddItemSchema).min(1).max(50),
+})
+
+export type PlaceAddItem = z.infer<typeof PlaceAddItemSchema>
+
+// ---- Permit PATCH ----
+export const PermitPatchSchema = z.object({
+  companyId: z.string().nullable(),
+})
+
+export type PermitPatch = z.infer<typeof PermitPatchSchema>
+
+// ---- Permit bulk-sync (propagate existing links to unlinked permits by contractor name) ----
+export const PermitBulkSyncSchema = z.object({
+  county: z.string().optional(),
+})
+
+export type PermitBulkSync = z.infer<typeof PermitBulkSyncSchema>
+
+// ---- Company create (from permit or other quick-create flows) ----
+export const CompanyCreateSchema = z.object({
+  name: z.string().min(1),
+  county: z.string().optional(),
+  phone: z.string().optional().nullable(),
+  website: z.string().optional().nullable(),
+  status: z.enum(['NEW', 'QUALIFYING', 'ACTIVE', 'INACTIVE', 'DO_NOT_CONTACT']).default('NEW'),
+  recordOrigin: z.enum(['DISCOVERED', 'IMPORTED', 'MANUAL']).default('MANUAL'),
+})
+
+export type CompanyCreate = z.infer<typeof CompanyCreateSchema>
