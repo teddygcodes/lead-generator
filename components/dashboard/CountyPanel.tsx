@@ -28,13 +28,21 @@ interface CountyPanelProps {
 export function CountyPanel({ county, onClose }: CountyPanelProps) {
   const [companies, setCompanies] = useState<CompanyRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
+    setError(null)
     fetch(`/api/dashboard/county/${encodeURIComponent(county)}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load county data (${r.status})`)
+        return r.json()
+      })
       .then((data) => setCompanies(data.companies ?? []))
-      .catch(() => setCompanies([]))
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Failed to load county data')
+        setCompanies([])
+      })
       .finally(() => setLoading(false))
   }, [county])
 
@@ -62,6 +70,8 @@ export function CountyPanel({ county, onClose }: CountyPanelProps) {
       <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
         {loading ? (
           <div className="px-4 py-6 text-center text-xs text-gray-400">Loading…</div>
+        ) : error ? (
+          <div className="px-4 py-6 text-center text-xs text-red-400">{error}</div>
         ) : companies.length === 0 ? (
           <div className="px-4 py-6 text-center text-xs text-gray-400">No companies in this county</div>
         ) : (
