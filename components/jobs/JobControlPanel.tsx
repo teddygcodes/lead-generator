@@ -12,6 +12,7 @@ import {
   Search,
   Globe,
   ClipboardCheck,
+  Briefcase,
   Loader2,
   CheckCircle,
   Play,
@@ -148,16 +149,19 @@ export function JobControlPanel({
   const [websiteResult, setWebsiteResult] = useState<QuickJobResult | null>(null)
   const [registryPhase, setRegistryPhase] = useState<QuickJobPhase>('idle')
   const [registryResult, setRegistryResult] = useState<QuickJobResult | null>(null)
+  const [jobPostingsPhase, setJobPostingsPhase] = useState<QuickJobPhase>('idle')
+  const [jobPostingsResult, setJobPostingsResult] = useState<QuickJobResult | null>(null)
 
   async function triggerJob(
     sourceType: string,
     setPhase: (p: QuickJobPhase) => void,
     setResult: (r: QuickJobResult | null) => void,
+    endpoint = '/api/jobs/run',
   ) {
     setPhase('running')
     setResult(null)
     try {
-      const res = await fetch('/api/jobs/run', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceType }),
@@ -338,7 +342,7 @@ export function JobControlPanel({
         <h2 className="text-xs font-medium uppercase tracking-wider text-gray-400 mb-3">
           Quick Actions
         </h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <QuickActionCard
             title="Discover New Contractors"
             description="Scrapes Accela permit portals (Atlanta, Gwinnett, Hall) to find new electrical contractors."
@@ -378,6 +382,26 @@ export function JobControlPanel({
             onReset={() => {
               setRegistryPhase('idle')
               setRegistryResult(null)
+            }}
+          />
+          <QuickActionCard
+            title="Sync Job Postings"
+            description="Searches Google for electrical contractors actively hiring — a growth buy signal."
+            icon={<Briefcase size={15} />}
+            phase={jobPostingsPhase}
+            result={jobPostingsResult}
+            lastRun={null}
+            onRun={() =>
+              triggerJob(
+                'JOB_POSTINGS',
+                setJobPostingsPhase,
+                setJobPostingsResult,
+                '/api/signals/job-postings/sync',
+              )
+            }
+            onReset={() => {
+              setJobPostingsPhase('idle')
+              setJobPostingsResult(null)
             }}
           />
         </div>

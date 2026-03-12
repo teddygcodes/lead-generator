@@ -28,10 +28,23 @@ export async function runFullEnrichment(companyId: string): Promise<PipelineResu
   }
 }
 
+const ENRICH_TTL_DAYS = 30
+
+function needsPlacesEnrichment(company: {
+  googlePlaceId: string | null
+  lastEnrichedAt: Date | null
+}): boolean {
+  if (!company.googlePlaceId) return true  // never enriched via Places
+  if (!company.lastEnrichedAt) return true // enriched but no timestamp
+  const daysSince =
+    (Date.now() - new Date(company.lastEnrichedAt).getTime()) / (1000 * 60 * 60 * 24)
+  return daysSince > ENRICH_TTL_DAYS
+}
+
 async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, website: true, notes: true, phone: true, city: true, state: true, county: true, street: true, zip: true },
+    select: { id: true, name: true, website: true, notes: true, phone: true, city: true, state: true, county: true, street: true, zip: true, googlePlaceId: true, lastEnrichedAt: true },
   })
 
   if (!company) return { success: false, error: 'Company not found' }
@@ -41,6 +54,11 @@ async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
 
   // --- No website: try Google Places ---
   if (!company.website) {
+    // Skip if recently enriched via Places (within TTL)
+    if (!needsPlacesEnrichment(company)) {
+      return { success: true, aiUsed: false, dataSource: 'cached' }
+    }
+
     if (!isGooglePlacesConfigured()) {
       return { success: false, error: 'No website and Google Places API not configured' }
     }
@@ -57,6 +75,7 @@ async function _runFullEnrichment(companyId: string): Promise<PipelineResult> {
       data: {
         phone: company.phone || place.phone || undefined,
         website: place.website || undefined,
+        googlePlaceId: place.placeId || undefined,
         lastEnrichedAt: new Date(),
         lastSeenAt: new Date(),
       },

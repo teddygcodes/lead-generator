@@ -93,7 +93,7 @@ const QUALIFYING_KEYWORDS = [
  * Falls back to legal-suffix-only stripping if full stripping yields fewer than 2 characters,
  * preventing names like "Power Solutions Group" from collapsing to "" and matching everything.
  */
-function normalizeForMatch(name: string): string {
+export function normalizeForMatch(name: string): string {
   const LEGAL_SUFFIXES = ['llc', 'inc', 'corp', 'co', 'ltd']
   const DESCRIPTOR_SUFFIXES = [
     'electric', 'electrical', 'power', 'systems', 'services',
@@ -126,7 +126,7 @@ function normalizeForMatch(name: string): string {
  * e.g. "smith electrical" ⊆ {"smith","electrical","services"} → 0.85  ✓
  *      "ces"              ⊄ {"brown","electrical","services"}  → 0      ✓
  */
-function matchScore(a: string, b: string): number {
+export function matchScore(a: string, b: string): number {
   if (!a || !b) return 0
   if (a === b) return 1.0
 
