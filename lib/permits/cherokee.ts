@@ -8,13 +8,20 @@
  *   POST https://cherokeega.com/cherokeestatus/permit-applications-report.php
  *   Content-Type: application/x-www-form-urlencoded
  *
+ * The portal is behind Cloudflare WAF which blocks standard Node.js fetch()
+ * via TLS fingerprint (JA3/JA4). This adapter uses playwright-core to make
+ * requests through a real Chrome browser engine, which passes the WAF.
+ *
  * Run the diagnostic script to verify:
  *   pnpm tsx scripts/test-cherokee.ts
  */
 
+import { chromium } from 'playwright-core'
+import type { Page } from 'playwright-core'
 import { parse } from 'node-html-parser'
 import type { HTMLElement } from 'node-html-parser'
 import { normalizeStatus, type NormalizedPermit } from './base'
+import { findChromiumPath } from './browser'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -22,6 +29,10 @@ import { normalizeStatus, type NormalizedPermit } from './base'
 
 const ENDPOINT =
   'https://cherokeega.com/cherokeestatus/permit-applications-report.php'
+
+/** URL to load in the browser before fetching — establishes same-origin context. */
+const ORIGIN_URL =
+  'https://cherokeega.com/cherokeestatus/permit-applications.php'
 
 const PAGE_SIZE = 50
 const MAX_PAGES = 10
@@ -119,14 +130,16 @@ function parseContacts(
 }
 
 // ---------------------------------------------------------------------------
-// Raw fetch
+// Raw fetch (browser-based to bypass Cloudflare TLS fingerprinting)
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch a single page of Cherokee permit HTML.
+ * POST to the permit report endpoint from within a Chrome page context.
+ * Using page.evaluate(fetch(...)) sends the request through Chrome's networking
+ * stack (BoringSSL TLS), which passes Cloudflare's JA3/JA4 fingerprint check.
  */
-async function fetchPage(recordstart: number): Promise<string> {
-  const body = new URLSearchParams({
+async function fetchPage(page: Page, recordstart: number): Promise<string> {
+  const bodyStr = new URLSearchParams({
     application_number: '',
     descript: '',
     contact_name: '',
@@ -138,27 +151,35 @@ async function fetchPage(recordstart: number): Promise<string> {
     filter: 'dateentered',
     sortorder: 'desc',
     d: '30',                // last 30 days
-  })
+  }).toString()
 
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Origin': 'https://cherokeega.com',
-      'Referer': 'https://cherokeega.com/cherokeestatus/permit-applications-report.php',
+  // Run the fetch inside the browser — same-origin to cherokeega.com
+  const result = await page.evaluate(
+    async ({ endpoint, body }: { endpoint: string; body: string }) => {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        })
+        if (!res.ok) {
+          return { ok: false as const, status: res.status, statusText: res.statusText, html: '' }
+        }
+        return { ok: true as const, status: res.status, statusText: '', html: await res.text() }
+      } catch (e) {
+        return { ok: false as const, status: 0, statusText: String(e), html: '' }
+      }
     },
-    body: body.toString(),
-  })
+    { endpoint: ENDPOINT, body: bodyStr },
+  )
 
-  if (!res.ok) {
-    throw new Error(`[cherokee] HTTP ${res.status} ${res.statusText} (recordstart=${recordstart})`)
+  if (!result.ok) {
+    throw new Error(
+      `[cherokee] HTTP ${result.status} ${result.statusText} (recordstart=${recordstart})`,
+    )
   }
 
-  return res.text()
+  return result.html
 }
 
 // ---------------------------------------------------------------------------
@@ -235,30 +256,68 @@ function parsePage(html: string): NormalizedPermit[] {
 /**
  * Fetch Cherokee County electrical permits from the last 30 days.
  * Paginates automatically (up to MAX_PAGES pages × PAGE_SIZE records).
+ *
+ * Launches a headless Chrome browser (reusing the Playwright Chromium already
+ * installed by the MCP plugin, or falling back to system Chrome). One browser
+ * instance is shared across all paginated requests and closed when done.
  */
 export async function fetchCherokeePermits(): Promise<NormalizedPermit[]> {
+  const executablePath = findChromiumPath()
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    args: [
+      // Disable navigator.webdriver flag so Cloudflare's bot check doesn't block us
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ],
+  })
+
   const allPermits: NormalizedPermit[] = []
 
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const recordstart = page * PAGE_SIZE
+  try {
+    const context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    })
 
-    let html: string
-    try {
-      html = await fetchPage(recordstart)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      throw new Error(`[cherokee] fetch failed on page ${page + 1}: ${message}`)
+    // Remove navigator.webdriver from the page's JS environment before any
+    // navigation so Cloudflare's bot detection doesn't see it.
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+    })
+
+    const page = await context.newPage()
+
+    // Navigate to the same origin so subsequent fetch() calls are same-origin.
+    // waitUntil:'load' gives Cloudflare's JS challenge time to complete and
+    // set any required cookies before we make the POST request.
+    await page.goto(ORIGIN_URL, { timeout: 20_000, waitUntil: 'load' })
+
+    for (let pageNum = 0; pageNum < MAX_PAGES; pageNum++) {
+      const recordstart = pageNum * PAGE_SIZE
+
+      let html: string
+      try {
+        html = await fetchPage(page, recordstart)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        throw new Error(`[cherokee] fetch failed on page ${pageNum + 1}: ${message}`)
+      }
+
+      const pagePermits = parsePage(html)
+      allPermits.push(...pagePermits)
+
+      console.log(
+        `[cherokee] page ${pageNum + 1}: parsed ${pagePermits.length} permits (total so far: ${allPermits.length})`,
+      )
+
+      // Stop if this page returned fewer than PAGE_SIZE — no more pages
+      if (pagePermits.length < PAGE_SIZE) break
     }
-
-    const pagePermits = parsePage(html)
-    allPermits.push(...pagePermits)
-
-    console.log(
-      `[cherokee] page ${page + 1}: parsed ${pagePermits.length} permits (total so far: ${allPermits.length})`,
-    )
-
-    // Stop if this page returned fewer than PAGE_SIZE — no more pages
-    if (pagePermits.length < PAGE_SIZE) break
+  } finally {
+    await browser.close()
   }
 
   console.log(`[cherokee] normalized ${allPermits.length} permits`)

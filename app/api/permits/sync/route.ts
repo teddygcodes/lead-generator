@@ -4,6 +4,11 @@ import { syncPermits, VALID_COUNTIES } from '@/lib/jobs/sync-permits'
 import { estimatePermitValues } from '@/lib/jobs/estimate-permit-value'
 import { db } from '@/lib/db'
 
+// Cherokee and Cobb syncs launch headless Chrome browsers.
+// Cherokee takes ~30 s; Cobb takes ~90–130 s (50 pages + 40+ detail pages).
+// Set limit high enough for both to complete.
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   const { userId } = await auth()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
