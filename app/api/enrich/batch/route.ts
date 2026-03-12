@@ -4,6 +4,9 @@ import { db } from '@/lib/db'
 import { EnrichBatchSchema } from '@/lib/validation/schemas'
 import { runFullEnrichment } from '@/lib/enrichment/pipeline'
 
+// Each company can take 5–15 s to enrich; allow enough headroom for a full batch.
+export const maxDuration = 300
+
 // Returns all company IDs pending enrichment, ordered least-recently enriched first.
 // Used by the client to drive the "Enrich All" progress loop.
 export async function GET() {
@@ -56,15 +59,27 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  const BATCH_SIZE = 25
   const results = []
-  for (const company of companies) {
-    try {
-      const result = await runFullEnrichment(company.id)
-      results.push({ id: company.id, name: company.name, ...result })
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
-      console.error(`[enrich/batch] company ${company.id} (${company.name}) threw:`, error)
-      results.push({ id: company.id, name: company.name, success: false, error })
+
+  for (let i = 0; i < companies.length; i += BATCH_SIZE) {
+    const chunk = companies.slice(i, i + BATCH_SIZE)
+    const chunkResults = await Promise.all(
+      chunk.map(async (company) => {
+        try {
+          const result = await runFullEnrichment(company.id)
+          return { id: company.id, name: company.name, ...result }
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err)
+          console.error(`[enrich/batch] company ${company.id} (${company.name}) threw:`, error)
+          return { id: company.id, name: company.name, success: false, error }
+        }
+      }),
+    )
+    results.push(...chunkResults)
+    // Small pause between chunks to avoid hammering external APIs
+    if (i + BATCH_SIZE < companies.length) {
+      await new Promise(r => setTimeout(r, 500))
     }
   }
 

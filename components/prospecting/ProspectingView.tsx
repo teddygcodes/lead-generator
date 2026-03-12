@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Search, Plus, Loader2, Globe, Star, Phone } from 'lucide-react'
+import { Search, Plus, Loader2, Globe, Star, Phone, Briefcase, Play } from 'lucide-react'
 import Link from 'next/link'
 import { normalizeName, normalizePhone } from '@/lib/normalization'
 import type { PlaceResult } from '@/lib/sources/google-places'
@@ -93,6 +93,10 @@ export function ProspectingView() {
   const [error, setError] = useState<string | null>(null)
   const [configMissing, setConfigMissing] = useState(false)
   const [toast, setToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null)
+  const [syncPhase, setSyncPhase] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [syncResult, setSyncResult] = useState<{
+    matched: number; created: number; newCompanies: number; skipped: number
+  } | null>(null)
 
   function showToast(message: string, variant: 'success' | 'error' = 'success') {
     setToast({ message, variant })
@@ -323,6 +327,23 @@ export function ProspectingView() {
     }
   }
 
+  const handleSyncJobPostings = async () => {
+    setSyncPhase('running')
+    setSyncResult(null)
+    try {
+      const res = await fetch('/api/signals/job-postings/sync', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setSyncPhase('error')
+        return
+      }
+      setSyncResult(data)
+      setSyncPhase('done')
+    } catch {
+      setSyncPhase('error')
+    }
+  }
+
   const newCount = results.filter((p) => !statusMap[p.placeId]?.inDB).length
   const presets = getPresetsForCounty(selectedCounty)
 
@@ -346,6 +367,46 @@ export function ProspectingView() {
             <p className="text-xs text-gray-500 mt-0.5">
               Search Google Places to discover new electrical contractors and add them to your database.
             </p>
+          </div>
+
+          {/* Job Postings sync strip */}
+          <div className="card px-4 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <Briefcase size={14} className="text-gray-400 flex-shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-gray-800">Sync Job Postings</p>
+                <p className="text-[11px] text-gray-500">
+                  {syncPhase === 'done' && syncResult
+                    ? `${syncResult.matched} matched · ${syncResult.created} new signals · ${syncResult.newCompanies} new companies`
+                    : 'Find contractors actively hiring — a buy signal for material sales.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex-shrink-0">
+              {(syncPhase === 'idle' || syncPhase === 'error') && (
+                <button
+                  onClick={handleSyncJobPostings}
+                  className="flex items-center gap-1.5 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 transition-colors"
+                >
+                  <Play size={10} />
+                  {syncPhase === 'error' ? 'Retry' : 'Run'}
+                </button>
+              )}
+              {syncPhase === 'running' && (
+                <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <Loader2 size={12} className="animate-spin" />
+                  Running…
+                </span>
+              )}
+              {syncPhase === 'done' && (
+                <button
+                  onClick={() => { setSyncPhase('idle'); setSyncResult(null) }}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  ✓ Done · Run again
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Config missing banner */}
