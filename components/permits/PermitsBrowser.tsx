@@ -141,6 +141,8 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ county }),
+        // Cherokee uses a headless browser fetch; allow up to 90 s before giving up
+        signal: AbortSignal.timeout(90_000),
       })
       // Refresh stats
       const freshStats = await fetch('/api/permits/stats').then(r => r.json()) as Record<string, CountyStat>
@@ -152,6 +154,8 @@ export function PermitsBrowser({ counties, initialStats }: PermitsBrowserProps) 
       }
     } catch (err) {
       console.error('[PermitsBrowser] sync failed:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      setSyncMsg(msg.includes('timeout') || msg.includes('abort') ? 'Sync timed out — try again' : `Sync failed: ${msg}`)
     } finally {
       setSyncingCounty(null)
     }

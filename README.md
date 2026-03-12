@@ -31,7 +31,7 @@ An internal sales intelligence tool for electrical distribution reps covering At
 - Enrich button triggers single-company website crawl
 
 ### Permits
-- Per-county permit browser: Gwinnett, Hall, Fulton, DeKalb, Cherokee
+- Per-county permit browser: Gwinnett, Hall, Fulton, DeKalb, Cherokee, Cobb
 - Sync per county (triggers the full ingest → dedupe → upsert → match → rescore pipeline)
 - Rematch: re-run company matching for a county using the current algorithm (useful after algorithm fixes)
 - Stats: permit count, last synced, newest permit date per county
@@ -87,7 +87,7 @@ An internal sales intelligence tool for electrical distribution reps covering At
 | DeKalb | ArcGIS FeatureServer REST API (`dekalb.ts`) | Active | Yes |
 | Cherokee | PHP portal HTML scraper (`cherokee.ts`) | Active | Yes |
 | Gwinnett / Hall / Fulton | Accela REST API (`accela.ts`) | Inactive — app registered, county authorization not yet granted | Would be yes |
-| Cobb | — | No adapter — Cobb County not found in Accela developer system | — |
+| Cobb | ACA citizen portal scraper (`cobb.ts`) — Playwright login required | Active — requires `COBB_ACA_USERNAME` + `COBB_ACA_PASSWORD` | Yes |
 | Forsyth / Jackson | EnerGov REST API | Removed — search results do not include contractor names, so permits cannot be matched to companies | No |
 
 The ACA scraper works against the public ASP.NET WebForms portal at `aca-prod.accela.com`. It manages session cookies and VIEWSTATE automatically, paginates through all result pages, and fetches each permit's detail page to extract the contractor business name, phone, and license number. No API key required.
@@ -182,6 +182,8 @@ Open [http://localhost:3000](http://localhost:3000). Sign in via Clerk. You'll l
 | `OPENCORPORATES_API_KEY` | OpenCorporates API key (business registry adapter) | No — adapter returns nothing without it |
 | `ACCELA_APP_ID` | Accela developer app ID (REST API permit adapter) | No — adapter returns [] without it or without county authorization |
 | `ACCELA_APP_SECRET` | Accela developer app secret | No |
+| `COBB_ACA_USERNAME` | Cobb County ACA portal login email (`cobbca.cobbcounty.gov`) | No — Cobb adapter returns `[]` without it |
+| `COBB_ACA_PASSWORD` | Cobb County ACA portal password | No — Cobb adapter returns `[]` without it |
 | `PERMIT_BATCH_SIZE` | ArcGIS result record count per page (default: `100`, max: `1000`) | No |
 | `PERMIT_LOOKBACK_DAYS` | Days back for permit queries (default: `90`) | No |
 
@@ -244,7 +246,9 @@ lib/
     accela.ts               Accela REST API adapter (inactive — pending county auth)
     accela-aca.ts           ACA citizen portal scraper — Gwinnett, Hall, Fulton
     dekalb.ts               DeKalb County ArcGIS FeatureServer adapter
+    browser.ts              Shared Playwright browser utilities (findChromiumPath)
     cherokee.ts             Cherokee County PHP portal scraper
+    cobb.ts                 Cobb County ACA portal scraper (Playwright login)
     energov.ts              EnerGov adapter (implemented but not in active sources)
   jobs/
     sync-permits.ts         Full permit pipeline: fetch → dedupe → upsert → match → rescore
@@ -330,7 +334,6 @@ pnpm db:studio    # Open Prisma Studio
 
 ## Known gaps
 
-- **Cobb County permits:** No working adapter. Cobb is not registered in the Accela developer system under any known agency name variation.
 - **Forsyth / Jackson permits:** EnerGov REST API is accessible but doesn't return contractor names in search results, so permits can't be matched to companies. Not in active sources.
 - **Accela REST API (Gwinnett / Hall / Fulton):** Fully implemented. Returns empty results until each county authorizes the developer app in their Accela admin portal — no code changes needed on this side.
 - **Notes and tags on company detail:** Schema and models exist; the UI shows a "coming later" placeholder.

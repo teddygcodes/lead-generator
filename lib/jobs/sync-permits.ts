@@ -10,6 +10,7 @@ import { accelaAdapter } from '@/lib/permits/accela'
 import { accelaAcaAdapter } from '@/lib/permits/accela-aca'
 import { fetchDekalbPermits } from '@/lib/permits/dekalb'
 import { fetchCherokeePermits } from '@/lib/permits/cherokee'
+import { fetchCobbPermits } from '@/lib/permits/cobb'
 import type { NormalizedPermit } from '@/lib/permits/base'
 import { scoreCompany } from '@/lib/scoring'
 import { normalizeName, normalizePhone } from '@/lib/normalization'
@@ -45,6 +46,7 @@ const ALL_SOURCES: SourceEntry[] = [
   { name: 'ACA_HALLCO',      fetch: () => accelaAcaAdapter('HALLCO') },
   { name: 'ARCGIS_DEKALB',   fetch: () => fetchDekalbPermits() },               // ArcGIS FeatureServer REST API (public, no auth required)
   { name: 'CHEROKEE_HTML',   fetch: () => fetchCherokeePermits() },             // Cherokee County PHP portal HTML scraper
+  { name: 'ACA_COBB',       fetch: () => fetchCobbPermits() },                  // Cobb County ACA portal scraper (requires COBB_ACA_USERNAME + COBB_ACA_PASSWORD)
   // EnerGov (Forsyth, Jackson) removed — API returns no contractor name so permits
   // can never be matched to companies or affect scoring. Re-add if contractor detail
   // endpoint becomes available.
@@ -56,6 +58,7 @@ const COUNTY_SOURCE_NAMES: Record<string, string[]> = {
   Fulton:   ['ACCELA_ATLANTA',  'ACA_ATLANTA'],  // Atlanta is a city in Fulton County
   DeKalb:   ['ARCGIS_DEKALB'],
   Cherokee: ['CHEROKEE_HTML'],
+  Cobb:     ['ACA_COBB'],
 }
 
 /** Valid county values accepted by the sync API route. */
